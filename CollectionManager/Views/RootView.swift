@@ -16,7 +16,7 @@ struct RootView: View {
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .confirmationDialog("Delete this collection? All items and collection settings will be permanently deleted.", isPresented: Binding(get: { collectionPendingDeletion != nil }, set: { if !$0 { collectionPendingDeletion = nil } }), titleVisibility: .visible) {
-            Button("Delete Collection", role: .destructive) { if let collection = collectionPendingDeletion { store.deleteCollection(collection) }; collectionPendingDeletion = nil }
+            Button("Delete Collection", role: .destructive) { if let collection = collectionPendingDeletion { Task { await store.deleteCollection(collection) } }; collectionPendingDeletion = nil }
         }
     }
 }

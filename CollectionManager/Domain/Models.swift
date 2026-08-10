@@ -150,14 +150,14 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
 
 struct Barcode: Hashable, Codable, Sendable {
     let value: String; let type: String
-    init?(rawValue: String, type: String = "EAN-13") {
+    nonisolated init?(rawValue: String, type: String = "EAN-13") {
         let digits = rawValue.filter(\.isNumber)
         guard [8, 12, 13, 14].contains(digits.count), Self.hasValidCheckDigit(digits) else { return nil }
         value = digits.count == 12 ? "0\(digits)" : digits
         self.type = digits.count == 12 ? "UPC-A" : type
     }
 
-    private static func hasValidCheckDigit(_ digits: String) -> Bool {
+    nonisolated private static func hasValidCheckDigit(_ digits: String) -> Bool {
         guard let checkDigit = digits.last.flatMap({ Int(String($0)) }) else { return false }
         let body = digits.dropLast().reversed().enumerated()
         let sum = body.reduce(0) { partial, entry in
@@ -173,8 +173,40 @@ enum MetadataValue: Codable, Hashable, Sendable {
     var displayValue: String { switch self { case .string(let v): v; case .integer(let v): "\(v)"; case .decimal(let v): "\(v)"; case .boolean(let v): v ? "Yes" : "No"; case .date(let v): v.formatted(date: .abbreviated, time: .omitted); case .url(let v): v.absoluteString } }
 }
 
+enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
+    case text
+    case number
+    case date
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var symbol: String {
+        switch self {
+        case .text: "textformat"
+        case .number: "number"
+        case .date: "calendar"
+        }
+    }
+}
+
+struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var name: String
+    var type: MetadataFieldType
+
+    init(id: UUID = UUID(), name: String = "New field", type: MetadataFieldType = .text) {
+        self.id = id
+        self.name = name
+        self.type = type
+    }
+
+    // Values are keyed by identity rather than name so renaming a field keeps
+    // the metadata already entered on every item in the collection.
+    var storageKey: String { "customField.\(id.uuidString)" }
+}
+
 struct CollectionModel: Identifiable, Hashable, Sendable {
-    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var role: CollectionMemberRole = .owner
+    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var role: CollectionMemberRole = .owner
 
     func status(for state: ItemState) -> CollectionStatus {
         statuses.first(where: { $0.id == state.rawValue }) ?? CollectionStatus.fallback(for: state)
@@ -208,13 +240,15 @@ struct CollectionSettingsPayload: Codable, Sendable {
     var category: CollectionCategory = .custom
     var statuses: [CollectionStatus] = CollectionStatus.defaults
     var mergedTags: [MergedTagRule] = []
+    var metadataFields: [MetadataFieldDefinition] = []
 
-    private enum CodingKeys: String, CodingKey { case category, statuses, statusLabels, mergedTags }
+    private enum CodingKeys: String, CodingKey { case category, statuses, statusLabels, mergedTags, metadataFields }
 
-    init(category: CollectionCategory = .custom, statuses: [CollectionStatus] = CollectionStatus.defaults, mergedTags: [MergedTagRule] = []) {
+    init(category: CollectionCategory = .custom, statuses: [CollectionStatus] = CollectionStatus.defaults, mergedTags: [MergedTagRule] = [], metadataFields: [MetadataFieldDefinition] = []) {
         self.category = category
         self.statuses = statuses
         self.mergedTags = mergedTags
+        self.metadataFields = metadataFields
     }
 
     init(from decoder: Decoder) throws {
@@ -232,6 +266,7 @@ struct CollectionSettingsPayload: Codable, Sendable {
             self.statuses = CollectionStatus.defaults
         }
         self.mergedTags = try container.decodeIfPresent([MergedTagRule].self, forKey: .mergedTags) ?? []
+        self.metadataFields = try container.decodeIfPresent([MetadataFieldDefinition].self, forKey: .metadataFields) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -239,6 +274,7 @@ struct CollectionSettingsPayload: Codable, Sendable {
         try container.encode(category, forKey: .category)
         try container.encode(statuses, forKey: .statuses)
         try container.encode(mergedTags, forKey: .mergedTags)
+        try container.encode(metadataFields, forKey: .metadataFields)
     }
 }
 
@@ -305,19 +341,30 @@ struct CollectionProductMatch: Identifiable, Sendable {
     let matchedBy: [String]
 }
 
-enum ItemSort: String, CaseIterable, Identifiable, Sendable {
+enum SortDirection: String, CaseIterable, Identifiable, Sendable {
+    case ascending
+    case descending
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+enum ItemSort: Hashable, Sendable {
     case updatedDescending
     case titleAscending
     case dateAscending
     case dateDescending
+    case metadata(fieldID: UUID, direction: SortDirection)
 
-    var id: String { rawValue }
+    static let builtInCases: [ItemSort] = [.updatedDescending, .titleAscending, .dateAscending, .dateDescending]
+
     var label: String {
         switch self {
         case .updatedDescending: "Recently updated"
         case .titleAscending: "Title"
         case .dateAscending: "Date (oldest first)"
         case .dateDescending: "Date (newest first)"
+        case .metadata: "Metadata"
         }
     }
 }

@@ -5,7 +5,54 @@ struct ItemCard: View {
     @Environment(AppStore.self) private var store
     let item: CollectionItem
     @State private var showingEdit = false
-    var body: some View { let status = store.status(for: item.state); return HStack(spacing: 14) { if let data = item.imageData, let image = UIImage(data: data) { Image(uiImage: image).resizable().scaledToFill().frame(width: 54, height: 64).clipShape(RoundedRectangle(cornerRadius: 14)) } else { Image(systemName: item.imageSystemName).font(.title2).foregroundStyle(status.color.color).frame(width: 54, height: 64).background(status.color.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14)) }; VStack(alignment: .leading, spacing: 4) { HStack { Text(item.title).font(.headline); Spacer(); Text(status.name).font(.caption.weight(.semibold)).foregroundStyle(status.color.color).padding(.horizontal, 8).padding(.vertical, 4).background(status.color.color.opacity(0.12), in: Capsule()) }; Text([item.brand, item.variant].filter { !$0.isEmpty }.joined(separator: " · ")).foregroundStyle(.secondary); if !item.itemDescription.isEmpty { LinkedText(item.itemDescription).font(.subheadline).foregroundStyle(.secondary).lineLimit(4) }; TagFlowLayout { ForEach(item.tags, id: \.self) { TagChip(title: $0) }; if item.quantity > 1 { Text("×\(item.quantity)").font(.caption).foregroundStyle(.secondary) } }; if !item.ratings.isEmpty { RatingSummary(ratings: item.ratings) }; if !item.comments.isEmpty { Label("\(item.comments.count) collaborator comment\(item.comments.count == 1 ? "" : "s")", systemImage: "text.bubble").font(.caption).foregroundStyle(.secondary) } } }.padding(14).background(.background, in: RoundedRectangle(cornerRadius: 20)).contentShape(Rectangle()).onTapGesture { showingEdit = true }.contextMenu { Button { showingEdit = true } label: { Label("Edit", systemImage: "pencil") }; Button(role: .destructive) { store.deleteItem(item) } label: { Label("Delete", systemImage: "trash") } }.sheet(isPresented: $showingEdit) { EditItemView(item: item) } }
+    var body: some View {
+        let status = store.status(for: item.state)
+        HStack(spacing: 14) {
+            ItemThumbnail(item: item, tint: status.color.color)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack { Text(item.title).font(.headline); Spacer(); Text(status.name).font(.caption.weight(.semibold)).foregroundStyle(status.color.color).padding(.horizontal, 8).padding(.vertical, 4).background(status.color.color.opacity(0.12), in: Capsule()) }
+                Text([item.brand, item.variant].filter { !$0.isEmpty }.joined(separator: " · ")).foregroundStyle(.secondary)
+                if !item.itemDescription.isEmpty { LinkedText(item.itemDescription).font(.subheadline).foregroundStyle(.secondary).lineLimit(4) }
+                TagFlowLayout { ForEach(item.tags, id: \.self) { TagChip(title: $0) }; if item.quantity > 1 { Text("×\(item.quantity)").font(.caption).foregroundStyle(.secondary) } }
+                if !item.ratings.isEmpty { RatingSummary(ratings: item.ratings) }
+                if !item.comments.isEmpty { Label("\(item.comments.count) collaborator comment\(item.comments.count == 1 ? "" : "s")", systemImage: "text.bubble").font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+        .contentShape(Rectangle())
+        .onTapGesture { showingEdit = true }
+        .contextMenu {
+            Button { showingEdit = true } label: { Label("Edit", systemImage: "pencil") }
+            if item.state != .consumed {
+                Button(role: .destructive) { Task { await store.deleteItem(item) } } label: { Label("Delete", systemImage: "trash") }
+            }
+        }
+        .sheet(isPresented: $showingEdit) { EditItemView(item: item) }
+    }
+}
+
+private struct ItemThumbnail: View {
+    let item: CollectionItem
+    let tint: Color
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: item.imageSystemName).font(.title2).foregroundStyle(tint)
+                    .background(tint.opacity(0.12))
+            }
+        }
+        .frame(width: 54, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .task(id: item.imageData) {
+            guard let data = item.imageData else { image = nil; return }
+            image = await Task.detached(priority: .utility) { UIImage(data: data) }.value
+        }
+    }
 }
 
 private struct RatingSummary: View {
@@ -19,23 +66,28 @@ private struct RatingSummary: View {
 }
 
 private struct LinkedText: View {
-    let value: AttributedString
+    let text: String
+    @State private var value: AttributedString
 
-    init(_ text: String) {
-        let attributed = NSMutableAttributedString(string: text)
-        let range = NSRange(location: 0, length: text.utf16.count)
-        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
-            detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-                guard let url = match?.url, let matchRange = match?.range else { return }
-                attributed.addAttribute(.link, value: url, range: matchRange)
-            }
-        }
-        value = (try? AttributedString(attributed, including: \.swiftUI)) ?? AttributedString(text)
-    }
+    init(_ text: String) { self.text = text; _value = State(initialValue: AttributedString(text)) }
 
     var body: some View {
         Text(value)
             .tint(.blue)
+            .task(id: text) {
+                guard text.localizedCaseInsensitiveContains("http") || text.localizedCaseInsensitiveContains("www.") else { return }
+                value = await Task.detached(priority: .utility) {
+                    let attributed = NSMutableAttributedString(string: text)
+                    let range = NSRange(location: 0, length: text.utf16.count)
+                    if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+                        detector.enumerateMatches(in: text, range: range) { match, _, _ in
+                            guard let url = match?.url, let matchRange = match?.range else { return }
+                            attributed.addAttribute(.link, value: url, range: matchRange)
+                        }
+                    }
+                    return (try? AttributedString(attributed, including: \.swiftUI)) ?? AttributedString(text)
+                }.value
+            }
     }
 }
 
@@ -99,7 +151,7 @@ private struct TagFlowLayout: Layout {
 
 struct AddItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
-    @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var recognitionMessage: String?; @State private var productMatches: [CollectionProductMatch] = []
+    @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var recognitionMessage: String?; @State private var productMatches: [CollectionProductMatch] = []; @State private var pendingScannedBarcode: Barcode?
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
@@ -118,7 +170,7 @@ struct AddItemView: View {
                             .accessibilityLabel("Barcode")
                         Button("Use") {
                             if let value = Barcode(rawValue: manualBarcode) {
-                                selectBarcode(value, lookupImmediately: false)
+                                selectBarcode(value)
                             } else {
                                 recognitionMessage = "Enter a valid 8, 12, 13, or 14 digit barcode."
                             }
@@ -174,6 +226,10 @@ struct AddItemView: View {
                     }
                 }
 
+                if let fields = store.selectedCollection?.metadataFields, !fields.isEmpty {
+                    CustomMetadataFieldsSection(fields: fields, metadata: $metadata)
+                }
+
                 Section("Editable proposal") {
                     TextField("Title", text: $title)
                     TextField("Brand", text: $brand)
@@ -198,15 +254,52 @@ struct AddItemView: View {
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .sheet(isPresented: $showingScanner) { BarcodeScannerSheet { value in selectBarcode(value, lookupImmediately: true) } }
+            .sheet(isPresented: $showingScanner, onDismiss: finishScannerHandoff) {
+                BarcodeScannerSheet { value in
+                    barcode = value
+                    manualBarcode = value.value
+                    productMatches = []
+                    isLookingUp = false
+                    recognitionMessage = "Barcode detected: \(value.value)"
+                    pendingScannedBarcode = value
+                }
+            }
             .fullScreenCover(isPresented: $showingCamera) { PhotoCaptureView { handleImage($0) } }
             .onAppear { if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) } }
         }
     }
-    private func selectBarcode(_ value: Barcode, lookupImmediately: Bool) { barcode = value; manualBarcode = value.value; productMatches = store.productMatches(for: value); if lookupImmediately { lookup(value) } }
-    private func lookup(_ value: Barcode) { let provider: any ProductMetadataProvider; switch store.selectedCollection?.category { case .food: provider = OpenFoodFactsProvider(); case .games: provider = GamesEANProvider(); case .boardGames: provider = GameUPCProvider(); case .books: provider = OpenLibraryProvider(); case .music: provider = MusicBrainzProvider(); case .cosmetics: provider = OpenFactsProvider(host: "world.openbeautyfacts.org"); case .petFood: provider = OpenFactsProvider(host: "world.openpetfoodfacts.org"); case .products: provider = OpenFactsProvider(host: "world.openproductsfacts.org"); default: recognitionMessage = "Product lookup is not configured for this collection category yet."; return }; isLookingUp = true; productMatches = store.productMatches(for: value); Task { do { if let product = try await provider.product(for: value) { await MainActor.run { if title.isEmpty { title = product.title }; if brand.isEmpty { brand = product.brand }; if variant.isEmpty { variant = product.variant }; if tags.isEmpty { tags = product.categories.joined(separator: ", ") }; if let country = product.country, !country.isEmpty { metadata["country"] = .string(country) }; if !product.categories.isEmpty { metadata["categories"] = .string(product.categories.joined(separator: ", ")) }; for (key, value) in product.extraFields { metadata[key] = .string(value) }; productMatches = store.productMatches(for: value, productName: product.title); recognitionMessage = "Product data found. Review the proposal before saving." } } else { await MainActor.run { recognitionMessage = "No product was found for this barcode." } } } catch { await MainActor.run { recognitionMessage = "\(error.localizedDescription) You can still enter the item manually." } }; await MainActor.run { isLookingUp = false } } }
+    private func selectBarcode(_ value: Barcode) {
+        barcode = value
+        manualBarcode = value.value
+        isLookingUp = false
+        recognitionMessage = "Barcode selected: \(value.value)"
+        Task {
+            await Task.yield()
+            guard barcode == value else { return }
+            productMatches = store.productMatches(for: value)
+        }
+    }
+    private func finishScannerHandoff() {
+        guard let value = pendingScannedBarcode else { return }
+        pendingScannedBarcode = nil
+        guard barcode == value else { return }
+        lookup(value)
+    }
+    private func lookup(_ value: Barcode) { let provider: any ProductMetadataProvider; switch store.selectedCollection?.category { case .food: provider = OpenFoodFactsProvider(); case .games: provider = GamesEANProvider(); case .boardGames: provider = GameUPCProvider(); case .books: provider = OpenLibraryProvider(); case .music: provider = MusicBrainzProvider(); case .cosmetics: provider = OpenFactsProvider(host: "world.openbeautyfacts.org"); case .petFood: provider = OpenFactsProvider(host: "world.openpetfoodfacts.org"); case .products: provider = OpenFactsProvider(host: "world.openproductsfacts.org"); default: recognitionMessage = "Product lookup is not configured for this collection category yet."; return }; isLookingUp = true; recognitionMessage = "Barcode detected: \(value.value). Looking up product…"; Task { await Task.yield(); guard barcode == value else { return }; productMatches = store.productMatches(for: value); do { if let product = try await provider.product(for: value) { await MainActor.run { guard barcode == value else { return }; if title.isEmpty { title = product.title }; if brand.isEmpty { brand = product.brand }; if variant.isEmpty { variant = product.variant }; if tags.isEmpty { tags = product.categories.joined(separator: ", ") }; if let country = product.country, !country.isEmpty { metadata["country"] = .string(country) }; if !product.categories.isEmpty { metadata["categories"] = .string(product.categories.joined(separator: ", ")) }; for (key, value) in product.extraFields { metadata[key] = .string(value) }; productMatches = store.productMatches(for: value, productName: product.title); recognitionMessage = "Product data found. Review the proposal before saving." } } else { await MainActor.run { guard barcode == value else { return }; recognitionMessage = "No product was found for this barcode." } } } catch { await MainActor.run { guard barcode == value else { return }; recognitionMessage = "\(error.localizedDescription) You can still enter the item manually." } }; await MainActor.run { if barcode == value { isLookingUp = false } } } }
     private func metadataBinding(for key: String) -> Binding<String> { Binding(get: { if case .string(let value) = metadata[key] { return value }; return metadata[key]?.displayValue ?? "" }, set: { metadata[key] = .string($0) }) }
-    private func handleImage(_ data: Data) { imageData = data; Task { do { let result = try await OCRService().recognizeText(in: data); await MainActor.run { if title.isEmpty { title = result.lines.first ?? "" }; if description.isEmpty { description = result.text }; recognitionMessage = result.text.isEmpty ? "No readable text was found." : "Text recognized from photo. Review the proposal." } } catch { await MainActor.run { recognitionMessage = "Photo saved, but text recognition failed." } } } }
+    private func handleImage(_ data: Data) {
+        recognitionMessage = "Preparing photo…"
+        Task {
+            let prepared = await ImageProcessor.preparedData(data)
+            imageData = prepared
+            do {
+                let result = try await OCRService().recognizeText(in: prepared)
+                if title.isEmpty { title = result.lines.first ?? "" }
+                if description.isEmpty { description = result.text }
+                recognitionMessage = result.text.isEmpty ? "No readable text was found." : "Text recognized from photo. Review the proposal."
+            } catch { recognitionMessage = "Photo saved, but text recognition failed." }
+        }
+    }
 }
 
 struct EditItemView: View {
@@ -223,7 +316,7 @@ struct EditItemView: View {
                     Picker("Status", selection: $state) { ForEach(store.statuses) { status in Text(status.name).tag(ItemState(rawValue: status.id)) } }
                     TextField("Tags, separated by commas", text: $tags)
                     PhotosPicker(selection: $pickerItem, matching: .images) { Label("Replace photo / run OCR", systemImage: "photo") }
-                        .onChange(of: pickerItem) { _, newValue in Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { imageData = data; if let result = try? await OCRService().recognizeText(in: data) { await MainActor.run { if description.isEmpty { description = result.text }; recognitionMessage = "Text recognized from photo. Review your changes." } } } } }
+                        .onChange(of: pickerItem) { _, newValue in Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { recognitionMessage = "Preparing photo…"; let prepared = await ImageProcessor.preparedData(data); imageData = prepared; if let result = try? await OCRService().recognizeText(in: prepared) { if description.isEmpty { description = result.text }; recognitionMessage = "Text recognized from photo. Review your changes." } else { recognitionMessage = "Photo saved, but text recognition failed." } } } }
                     if let recognitionMessage { Text(recognitionMessage).font(.footnote).foregroundStyle(.secondary) }
                 }
                 if !category.detailFields.isEmpty {
@@ -231,8 +324,11 @@ struct EditItemView: View {
                         ForEach(category.detailFields, id: \.key) { field in TextField(field.title, text: metadataBinding(for: field.key), prompt: Text(field.placeholder)) }
                     }
                 }
+                if let fields = store.selectedCollection?.metadataFields, !fields.isEmpty {
+                    CustomMetadataFieldsSection(fields: fields, metadata: $metadata)
+                }
                 annotationsSection
-                Section { Button("Delete item", role: .destructive) { store.deleteItem(original); dismiss() } }
+                Section { Button("Delete item", role: .destructive) { dismiss(); Task { await store.deleteItem(original) } } }
             }
             .navigationTitle("Edit item")
             .toolbar {
@@ -273,6 +369,127 @@ struct EditItemView: View {
         }
     }
     private func metadataBinding(for key: String) -> Binding<String> { Binding(get: { if case .string(let value) = metadata[key] { return value }; return metadata[key]?.displayValue ?? "" }, set: { metadata[key] = .string($0) }) }
+}
+
+private struct CustomMetadataFieldsSection: View {
+    let fields: [MetadataFieldDefinition]
+    @Binding var metadata: [String: MetadataValue]
+
+    var body: some View {
+        Section("Custom details") {
+            ForEach(fields) { field in
+                MetadataFieldValueEditor(
+                    field: field,
+                    value: Binding(
+                        get: { metadata[field.storageKey] },
+                        set: { newValue in
+                            if let newValue {
+                                metadata[field.storageKey] = newValue
+                            } else {
+                                metadata.removeValue(forKey: field.storageKey)
+                            }
+                        }
+                    )
+                )
+            }
+        }
+    }
+}
+
+private struct MetadataFieldValueEditor: View {
+    let field: MetadataFieldDefinition
+    @Binding var value: MetadataValue?
+    @State private var numberText: String
+
+    init(field: MetadataFieldDefinition, value: Binding<MetadataValue?>) {
+        self.field = field
+        _value = value
+        _numberText = State(initialValue: Self.numberText(for: value.wrappedValue))
+    }
+
+    var body: some View {
+        switch field.type {
+        case .text:
+            TextField(field.name, text: Binding(
+                get: {
+                    if case .string(let text)? = value { return text }
+                    return value?.displayValue ?? ""
+                },
+                set: { value = $0.isEmpty ? nil : .string($0) }
+            ))
+        case .number:
+            VStack(alignment: .leading, spacing: 4) {
+                TextField(field.name, text: $numberText)
+                    .keyboardType(.decimalPad)
+                    .onChange(of: numberText) { _, newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            value = nil
+                        } else if let number = Self.numberFormatter.number(from: trimmed) {
+                            value = .decimal(number.doubleValue)
+                        }
+                    }
+                if hasInvalidNumber {
+                    Text("Enter a valid number.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        case .date:
+            if case .date? = value {
+                HStack {
+                    DatePicker(field.name, selection: Binding(
+                        get: {
+                            if case .date(let date)? = value { return date }
+                            return .now
+                        },
+                        set: { value = .date($0) }
+                    ), displayedComponents: .date)
+                    Button(role: .destructive) { value = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear \(field.name)")
+                }
+            } else {
+                Button { value = .date(.now) } label: {
+                    Label("Set \(field.name)", systemImage: "calendar.badge.plus")
+                }
+            }
+        }
+    }
+
+    private var hasInvalidNumber: Bool {
+        let trimmed = numberText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && Self.numberFormatter.number(from: trimmed) == nil
+    }
+
+    private static let numberFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = .current
+        formatter.maximumFractionDigits = 16
+        return formatter
+    }()
+
+    private static func numberText(for value: MetadataValue?) -> String {
+        switch value {
+        case .integer(let number):
+            return numberFormatter.string(from: NSNumber(value: number)) ?? "\(number)"
+        case .decimal(let number):
+            return numberFormatter.string(from: NSNumber(value: number)) ?? "\(number)"
+        case .string(let text):
+            return text
+        case .date(let date):
+            return date.formatted(date: .numeric, time: .omitted)
+        case .boolean(let value):
+            return value ? "1" : "0"
+        case .url(let url):
+            return url.absoluteString
+        case nil:
+            return ""
+        }
+    }
 }
 
 private struct RatingPicker: View {

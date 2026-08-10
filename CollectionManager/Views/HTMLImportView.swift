@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct HTMLImportView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var sourceURL = "https://compendion.net/dirtyminutesleft/drinks/"
+    @State private var sourceURL = ""
     @State private var tables: [HTMLImportTable] = []
     @State private var selectedTableIndex = 0
     @State private var showingFileImporter = false

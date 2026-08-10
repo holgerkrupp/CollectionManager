@@ -10,6 +10,7 @@ struct SettingsView: View {
 struct CollectionSettingsView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let collection: CollectionModel
     @State private var statuses: [CollectionStatus]
+    @State private var metadataFields: [MetadataFieldDefinition]
     @State private var defaultState: ItemState
     @State private var barcodeRequired = false
 
@@ -17,6 +18,7 @@ struct CollectionSettingsView: View {
         self.collection = collection
         let configured = collection.statuses.isEmpty ? CollectionStatus.defaults : collection.statuses
         _statuses = State(initialValue: configured)
+        _metadataFields = State(initialValue: collection.metadataFields)
         _defaultState = State(initialValue: configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
     }
 
@@ -48,7 +50,29 @@ struct CollectionSettingsView: View {
                 } header: {
                     Text("Statuses")
                 } footer: {
-                    Text("Drag to reorder. Removing a status moves its existing items to the first remaining status.")
+                    Text("Tap a status to edit it. Use Edit to reorder or remove statuses. Removing one moves its existing items to the first remaining status.")
+                }
+
+                Section {
+                    ForEach($metadataFields) { $field in
+                        NavigationLink {
+                            MetadataFieldDefinitionEditorView(field: $field)
+                        } label: {
+                            Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
+                        }
+                    }
+                    .onDelete { metadataFields.remove(atOffsets: $0) }
+                    .onMove { metadataFields.move(fromOffsets: $0, toOffset: $1) }
+
+                    Button {
+                        metadataFields.append(MetadataFieldDefinition())
+                    } label: {
+                        Label("Add metadata field", systemImage: "plus.circle.fill")
+                    }
+                } header: {
+                    Text("Item metadata")
+                } footer: {
+                    Text("Tap a field to edit it. Use Edit to reorder or remove fields. Custom fields appear when adding or editing every item in this collection. Removing one hides its existing values but does not delete them.")
                 }
 
                 Section("Adding") {
@@ -60,9 +84,11 @@ struct CollectionSettingsView: View {
                     Toggle("Require barcode", isOn: $barcodeRequired)
                 }
             }
-            .environment(\.editMode, .constant(.active))
             .navigationTitle("Collection settings")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton()
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { save() }
                 }
@@ -79,8 +105,39 @@ struct CollectionSettingsView: View {
             if cleaned[index].symbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { cleaned[index].symbol = "circle" }
         }
         updated.statuses = cleaned
+        updated.metadataFields = metadataFields.enumerated().map { index, field in
+            var field = field
+            field.name = field.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if field.name.isEmpty { field.name = "Field \(index + 1)" }
+            return field
+        }
         store.updateCollection(updated)
         dismiss()
+    }
+}
+
+struct MetadataFieldDefinitionEditorView: View {
+    @Binding var field: MetadataFieldDefinition
+
+    var body: some View {
+        Form {
+            Section("Field") {
+                TextField("Name", text: $field.name)
+                Picker("Type", selection: $field.type) {
+                    ForEach(MetadataFieldType.allCases) { type in
+                        Label(type.label, systemImage: type.symbol).tag(type)
+                    }
+                }
+            }
+            Section {
+                Label(field.name.isEmpty ? "Field name" : field.name, systemImage: field.type.symbol)
+            } header: {
+                Text("Preview")
+            } footer: {
+                Text("Changing a field's type keeps existing values. Each item can replace its value the next time it is edited.")
+            }
+        }
+        .navigationTitle("Edit metadata field")
     }
 }
 
@@ -112,7 +169,7 @@ struct EditCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let original: CollectionModel
     @State private var name: String; @State private var subtitle: String; @State private var icon: String; @State private var category: CollectionCategory
     init(collection: CollectionModel) { original = collection; _name = State(initialValue: collection.name); _subtitle = State(initialValue: collection.subtitle); _icon = State(initialValue: collection.icon); _category = State(initialValue: collection.category) }
-    var body: some View { NavigationStack { Form { TextField("Name", text: $name); Picker("Category", selection: $category) { ForEach(CollectionCategory.allCases) { Text($0.name).tag($0) } }; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); NavigationLink("Customize statuses") { CollectionSettingsView(collection: store.selectedCollection ?? original) } } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+    var body: some View { NavigationStack { Form { TextField("Name", text: $name); Picker("Category", selection: $category) { ForEach(CollectionCategory.allCases) { Text($0.name).tag($0) } }; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); NavigationLink("Customize statuses and metadata") { CollectionSettingsView(collection: store.selectedCollection ?? original) } } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
 }
 
 struct NewCollectionView: View {

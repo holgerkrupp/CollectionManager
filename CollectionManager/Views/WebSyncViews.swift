@@ -98,7 +98,7 @@ struct WebSyncEditorView: View {
     init(collectionID: UUID, sync: WebSyncRecord? = nil) {
         self.collectionID = collectionID
         existingSync = sync
-        _urlString = State(initialValue: sync?.urlString ?? "https://compendion.net/dirtyminutesleft/drinks/")
+        _urlString = State(initialValue: sync?.urlString ?? "")
         _mapping = State(initialValue: sync?.mapping ?? [])
         _intervalMinutes = State(initialValue: sync?.intervalMinutes ?? 360)
         _addNewItems = State(initialValue: sync?.addNewItems ?? true)

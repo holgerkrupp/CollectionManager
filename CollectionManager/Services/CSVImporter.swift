@@ -3,7 +3,8 @@ import Foundation
 struct ImportDraft: Identifiable, Sendable { let id = UUID(); var title: String; var brand: String; var variant: String; var description: String; var state: ItemState; var quantity: Int; var tags: [String]; var barcode: Barcode?; var sourceIdentifier: String? = nil }
 
 struct CollectionImporter {
-    func parseCSV(_ data: Data) throws -> [ImportDraft] {
+    nonisolated init() {}
+    nonisolated func parseCSV(_ data: Data) throws -> [ImportDraft] {
         guard var text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
         if text.first == "\u{feff}" { text.removeFirst() }
         let rows = parseRows(text).filter { $0.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) }
@@ -27,15 +28,22 @@ struct CollectionImporter {
                 brand: value(["brand", "manufacturer"]),
                 variant: value(["variant", "flavour", "flavor"]),
                 description: value(["description", "notes"]),
-                state: value(["state", "status"]).lowercased().isEmpty ? .wanted : ItemState(rawValue: value(["state", "status"]).lowercased()),
+                state: ItemState(rawValue: value(["state", "status"]).lowercased().isEmpty ? "wanted" : value(["state", "status"]).lowercased()),
                 quantity: max(Int(value(["quantity", "count"])) ?? 1, 1),
-                tags: TagUtilities.splitTags(value(["tags", "labels"])),
+                tags: splitTags(value(["tags", "labels"])),
                 barcode: Barcode(rawValue: value(["barcode", "ean", "upc"]))
             )
         }
     }
 
-    private func parseRows(_ text: String) -> [[String]] {
+    nonisolated private func splitTags(_ value: String) -> [String] {
+        var seen = Set<String>()
+        return value.split { ",|;/".contains($0) }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter {
+            !$0.isEmpty && seen.insert($0.lowercased()).inserted
+        }
+    }
+
+    nonisolated private func parseRows(_ text: String) -> [[String]] {
         var rows: [[String]] = []
         var row: [String] = []
         var field = ""

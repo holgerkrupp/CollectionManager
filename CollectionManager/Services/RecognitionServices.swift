@@ -2,8 +2,27 @@ import Foundation
 import Vision
 import ImageIO
 import Security
+import UniformTypeIdentifiers
 
 struct OCRResult: Sendable { var text: String; var lines: [String] }
+
+struct ImageProcessor: Sendable {
+    static func preparedData(_ data: Data, maximumPixelSize: Int = 1_600) async -> Data {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+                  ] as CFDictionary),
+                  let output = CFDataCreateMutable(nil, 0),
+                  let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil) else { return data }
+            CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.78] as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else { return data }
+            return output as Data
+        }.value
+    }
+}
 
 struct OCRService: Sendable {
     func recognizeText(in imageData: Data) async throws -> OCRResult {

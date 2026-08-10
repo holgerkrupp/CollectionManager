@@ -34,11 +34,16 @@ import SwiftData
             RootView()
                 .environment(store)
                 .task {
-                    store.configure(context: container.mainContext)
-                    store.load()
+                    store.configure(context: container.mainContext, container: container)
+                    store.loadCollections()
                     WebSyncScheduler.schedule()
-                    // Give SwiftUI a chance to commit the first local frame.
+                    // Keep launch local and responsive. Sync starts after the
+                    // first frame and is skipped when the process has no
+                    // CloudKit entitlement (for example an unsigned simulator build).
                     await Task.yield()
+                    await store.loadSelectedCollectionInBackground()
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard !Task.isCancelled else { return }
                     await store.syncCollections()
                 }
                 .onOpenURL { url in Task { await store.acceptShare(from: url) } }
