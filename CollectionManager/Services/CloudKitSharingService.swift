@@ -6,6 +6,8 @@ enum SharingError: LocalizedError {
     case noAccount
     case restricted
     case temporarilyUnavailable
+    case invalidInvitation
+    case invitationNotReady
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +19,10 @@ enum SharingError: LocalizedError {
             "This iCloud account is restricted from sharing. Check Screen Time or device-management restrictions and try again."
         case .temporarilyUnavailable:
             "iCloud is temporarily unavailable. Check your connection and try again."
+        case .invalidInvitation:
+            "This invitation does not belong to Collection Manager. Ask the owner to send a new invitation from the app."
+        case .invitationNotReady:
+            "The invitation was accepted, but iCloud is still preparing the shared collection. Wait a moment and try syncing again."
         }
     }
 }
@@ -140,7 +146,11 @@ final class CloudKitSharingService {
         return cloudError.code == .serverRecordChanged || cloudError.code == .constraintViolation || isBatchFailure(error)
     }
 
-    func controller(for share: CKShare) -> UICloudSharingController { UICloudSharingController(share: share, container: container) }
+    func controller(for share: CKShare) -> UICloudSharingController {
+        let controller = UICloudSharingController(share: share, container: container)
+        controller.availablePermissions = [.allowPrivate, .allowReadWrite]
+        return controller
+    }
 
     func sync(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws -> [CloudCollectionSnapshot] {
         guard Self.isAvailable else { throw SharingError.unavailable }
@@ -159,16 +169,46 @@ final class CloudKitSharingService {
                 if let metadata { continuation.resume(returning: metadata) } else { continuation.resume(throwing: error ?? SharingError.unavailable) }
             }
         }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let operation = CKAcceptSharesOperation(shareMetadatas: [metadata])
-            operation.acceptSharesResultBlock = { result in
-                switch result {
-                case .success: continuation.resume()
-                case .failure(let error): continuation.resume(throwing: error)
+        try await acceptShare(metadata: metadata)
+    }
+
+    func acceptShare(metadata: CKShare.Metadata) async throws {
+        guard Self.isAvailable else { throw SharingError.unavailable }
+        guard metadata.containerIdentifier == Self.containerIdentifier else { throw SharingError.invalidInvitation }
+        try await requireAvailableAccount()
+
+        if metadata.participantStatus == .pending {
+            let invitationContainer = CKContainer(identifier: metadata.containerIdentifier)
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let operation = CKAcceptSharesOperation(shareMetadatas: [metadata])
+                operation.acceptSharesResultBlock = { result in
+                    switch result {
+                    case .success: continuation.resume()
+                    case .failure(let error): continuation.resume(throwing: error)
+                    }
                 }
+                invitationContainer.add(operation)
             }
-            container.add(operation)
         }
+
+        guard let rootRecordID = metadata.hierarchicalRootRecordID else { throw SharingError.invalidInvitation }
+        try await waitForSharedRoot(rootRecordID)
+    }
+
+    private func waitForSharedRoot(_ rootRecordID: CKRecord.ID) async throws {
+        // A successful CKAcceptSharesOperation can finish before CloudKit has
+        // exposed the shared zone. Do not sync until the hierarchy root is
+        // readable, otherwise a valid invitation appears to contain no list.
+        let retryDelays: [UInt64] = [0, 250_000_000, 500_000_000, 1_000_000_000, 2_000_000_000, 4_000_000_000]
+        for delay in retryDelays {
+            if delay > 0 { try await Task.sleep(nanoseconds: delay) }
+            do {
+                _ = try await container.sharedCloudDatabase.record(for: rootRecordID)
+                return
+            } catch let error as CKError where error.code == .unknownItem || error.code == .zoneNotFound || error.code == .serviceUnavailable { }
+        }
+
+        throw SharingError.invitationNotReady
     }
 
     private func push(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws {

@@ -1,4 +1,5 @@
 import Foundation
+import CloudKit
 import Observation
 import SwiftData
 
@@ -25,6 +26,7 @@ import SwiftData
     var syncState: CollectionSyncState = .idle
     var syncError: String?
     var pendingSyncCount = 0
+    private var syncRequestedWhileSyncing = false
     func configure(context: ModelContext, container: ModelContainer) { guard repository == nil else { return }; modelContext = context; repository = CollectionRepository(context: context); backgroundRepository = CollectionBackgroundRepository(container: container) }
     func load() { loadCollections(); loadSelectedCollection() }
     func loadCollections() {
@@ -126,7 +128,10 @@ import SwiftData
     func syncCollections() async {
         guard let repository, let backgroundRepository else { return }
         guard CloudKitSharingService.isAvailable else { return }
-        guard syncState != .syncing else { return }
+        guard syncState != .syncing else {
+            syncRequestedWhileSyncing = true
+            return
+        }
         syncState = .syncing; syncError = nil
         let service = CloudKitSharingService()
         let localCollections = repository.collections()
@@ -146,8 +151,13 @@ import SwiftData
             pendingSyncCount = repository.pendingMutations().count
             if let collectionID = selectedCollection?.id { repository.setSyncState(collectionID: collectionID, state: .error, error: error.localizedDescription) }
         }
+        if syncRequestedWhileSyncing {
+            syncRequestedWhileSyncing = false
+            await syncCollections()
+        }
     }
     func acceptShare(from url: URL) async { do { try await CloudKitSharingService().acceptShare(from: url); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
+    func acceptShare(metadata: CKShare.Metadata) async { do { try await CloudKitSharingService().acceptShare(metadata: metadata); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
     var statuses: [CollectionStatus] {
         guard let configured = selectedCollection?.statuses, !configured.isEmpty else { return CollectionStatus.defaults }
         return configured

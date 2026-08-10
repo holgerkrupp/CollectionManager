@@ -1,7 +1,67 @@
 import SwiftUI
 import SwiftData
+import CloudKit
+import UIKit
+
+final class CloudShareAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = CloudShareSceneDelegate.self
+        return configuration
+    }
+
+    func application(_ application: UIApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
+        CloudShareInvitationInbox.shared.receive(metadata)
+    }
+}
+
+final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        if let metadata = connectionOptions.cloudKitShareMetadata {
+            CloudShareInvitationInbox.shared.receive(metadata)
+        }
+    }
+
+    func windowScene(_ windowScene: UIWindowScene, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
+        CloudShareInvitationInbox.shared.receive(metadata)
+    }
+}
+
+@MainActor final class CloudShareInvitationInbox {
+    static let shared = CloudShareInvitationInbox()
+
+    private var pending: [CKShare.Metadata] = []
+    private var handler: ((CKShare.Metadata) async -> Void)?
+    private var isProcessing = false
+
+    func install(handler: @escaping (CKShare.Metadata) async -> Void) {
+        self.handler = handler
+        processNextIfNeeded()
+    }
+
+    func receive(_ metadata: CKShare.Metadata) {
+        pending.append(metadata)
+        processNextIfNeeded()
+    }
+
+    private func processNextIfNeeded() {
+        guard !isProcessing, let handler, !pending.isEmpty else { return }
+        isProcessing = true
+        let metadata = pending.removeFirst()
+        Task {
+            await handler(metadata)
+            isProcessing = false
+            processNextIfNeeded()
+        }
+    }
+}
 
 @main struct CollectionManagerApp: App {
+    @UIApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
     let container: ModelContainer
     @State private var store = AppStore()
     init() {
@@ -35,6 +95,9 @@ import SwiftData
                 .environment(store)
                 .task {
                     store.configure(context: container.mainContext, container: container)
+                    CloudShareInvitationInbox.shared.install { metadata in
+                        await store.acceptShare(metadata: metadata)
+                    }
                     store.loadCollections()
                     WebSyncScheduler.schedule()
                     // Keep launch local and responsive. Sync starts after the
