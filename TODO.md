@@ -10,7 +10,7 @@ This checklist compares the original product brief with the implementation curre
 
 ### CloudKit collaboration
 
-- `[~]` Replace `iCloud.com.example.CollectionManager` with a registered production container in `CollectionManager.entitlements` and `CloudKitSharingService.swift`.
+- `[x]` Use the registered `iCloud.de.holgerkrupp.CollectionManager` production container in `CollectionManager.entitlements` and `CloudKitSharingService.swift`.
 - `[~]` Share a collection root and child item records using `CKShare` and a custom zone. The native share sheet and deterministic child mapping are wired; production container/schema configuration is still required.
 - `[x]` Add deterministic CloudKit record mapping and synchronization for collections, items, tags, metadata, and lifecycle events.
 - `[x]` Fetch and merge collection and item records from both the owner’s private database and the participant shared database.
