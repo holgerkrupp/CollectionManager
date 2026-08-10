@@ -221,6 +221,15 @@ actor CollectionBackgroundRepository {
     }
     func addItem(_ item: CollectionItem) { guard role(for: item.collectionID).canEdit else { return }; var item = item; item.tags = TagUtilities.applyingMergedTags(item.tags, rules: mergedTags(for: item.collectionID)); context.insert(ItemRecord(from: item)); context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "created")); enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem"); save() }
     func webSyncs(for collectionID: UUID) -> [WebSyncRecord] { (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.urlString)]))) ?? [] }
+    func collectionName(for collectionID: UUID) -> String {
+        let id = collectionID
+        return (try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first?.name) ?? "Collection"
+    }
+    func metadataFields(for collectionID: UUID) -> [MetadataFieldDefinition] {
+        let id = collectionID
+        guard let record = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
+        return model(from: record).metadataFields
+    }
     func addWebSync(_ sync: WebSyncRecord) { context.insert(sync); save() }
     func updateWebSync(_ sync: WebSyncRecord) { save() }
     func deleteWebSync(_ sync: WebSyncRecord) { context.delete(sync); save() }
@@ -243,12 +252,12 @@ actor CollectionBackgroundRepository {
         if let existing {
             let previous = existing.domain
             var item = previous
-            item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.state = draft.state; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; item.importSourceKey = sourceKey; item.updatedAt = .now
+            item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.state = draft.state; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = sourceKey; item.updatedAt = .now
             existing.update(from: item)
             context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: previous.state == item.state ? "imported" : "importedStateChanged")); save()
             return false
         }
-        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: [:], imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey)
+        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey)
         addItem(item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true
     }
     func importDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String)], collectionID: UUID) {
@@ -268,13 +277,13 @@ actor CollectionBackgroundRepository {
             if let existing {
                 let previous = existing.domain
                 var item = previous
-                item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.state = draft.state; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.importSourceKey = entry.sourceKey; item.updatedAt = .now
+                item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.state = draft.state; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = entry.sourceKey; item.updatedAt = .now
                 existing.update(from: item)
                 context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: previous.state == item.state ? "imported" : "importedStateChanged"))
                 bySource[entry.sourceKey] = existing
                 byIdentity[importIdentity(title: item.title, brand: item.brand, variant: item.variant)] = existing
             } else {
-                let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: [:], imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
+                let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
                 let record = ItemRecord(from: item)
                 context.insert(record); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "created")); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); enqueue(collectionID: collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
                 bySource[entry.sourceKey] = record
@@ -328,9 +337,9 @@ actor CollectionBackgroundRepository {
         if changed > 0 { save() }
         return changed
     }
-    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) -> Bool { let existing = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID && $0.importSourceKey == sourceKey })).first; if let existing { let previous = existing.domain; var item = previous; item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; if updateExistingState { item.state = draft.state; item.consumedAt = draft.state == .consumed ? (item.consumedAt ?? .now) : nil }; item.updatedAt = .now; existing.update(from: item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: updateExistingState && previous.state != item.state ? "importedStateChanged" : "imported")); save(); return false }; let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: [:], imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey); addItem(item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true }
-    func applyWebDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)], collectionID: UUID) -> (added: Int, updated: Int) {
-        guard role(for: collectionID).canEdit, !drafts.isEmpty else { return (0, 0) }
+    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) -> Bool { let existing = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID && $0.importSourceKey == sourceKey })).first; if let existing { let previous = existing.domain; var item = previous; item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; if updateExistingState { item.state = draft.state; item.consumedAt = draft.state == .consumed ? (item.consumedAt ?? .now) : nil }; item.updatedAt = .now; existing.update(from: item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: updateExistingState && previous.state != item.state ? "importedStateChanged" : "imported")); save(); return false }; let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey); addItem(item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true }
+    func applyWebDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)], collectionID: UUID) -> WebSyncApplyResult {
+        guard role(for: collectionID).canEdit, !drafts.isEmpty else { return WebSyncApplyResult() }
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
         let rules = mergedTags(for: collectionID)
         var bySource: [String: ItemRecord] = [:]
@@ -339,30 +348,55 @@ actor CollectionBackgroundRepository {
         }
         var added = 0
         var updated = 0
+        var addedItems: [String] = []
+        var matchedStateChanges: [AutomaticSyncStateChange] = []
 
         for entry in drafts {
             let draft = entry.draft
             if let existing = bySource[entry.sourceKey] {
                 let previous = existing.domain
                 var item = previous
-                item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.importSourceKey = entry.sourceKey
+                item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = entry.sourceKey
                 if entry.updateExistingState { item.state = draft.state; item.consumedAt = draft.state == .consumed ? (item.consumedAt ?? .now) : nil }
                 item.updatedAt = .now
                 existing.update(from: item)
                 context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: entry.updateExistingState && previous.state != item.state ? "importedStateChanged" : "imported"))
+                if entry.updateExistingState, previous.state != item.state {
+                    matchedStateChanges.append(AutomaticSyncStateChange(title: item.title, newState: item.state))
+                }
                 updated += 1
             } else {
-                let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: [:], imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
+                let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
                 let record = ItemRecord(from: item)
                 context.insert(record); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "created")); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); enqueue(collectionID: collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
                 bySource[entry.sourceKey] = record
                 added += 1
+                addedItems.append(item.title)
             }
         }
         save()
-        return (added, updated)
+        return WebSyncApplyResult(added: added, updated: updated, addedItems: addedItems, matchedStateChanges: matchedStateChanges)
     }
     func updateItem(_ item: CollectionItem, previousState: ItemState? = nil) { guard role(for: item.collectionID).canEdit else { return }; let itemID = item.id; guard let record = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return }; var item = item; item.tags = TagUtilities.applyingMergedTags(item.tags, rules: mergedTags(for: item.collectionID)); record.update(from: item); if let previousState, previousState != item.state { context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "stateChanged", note: "\(previousState.label) → \(item.state.label)")) }; enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem"); save() }
+    @discardableResult func bulkUpdateState(for itemIDs: Set<UUID>, in collectionID: UUID, to state: ItemState) -> Int {
+        guard role(for: collectionID).canEdit, !itemIDs.isEmpty else { return 0 }
+        let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        var changed = 0
+        for record in records where itemIDs.contains(record.id) {
+            let previousState = ItemState(rawValue: record.stateRawValue)
+            guard previousState != state else { continue }
+            var item = record.domain
+            item.state = state
+            item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil
+            item.updatedAt = .now
+            record.update(from: item)
+            context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "stateChanged", note: "\(previousState.label) → \(state.label)"))
+            enqueue(collectionID: collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
+            changed += 1
+        }
+        if changed > 0 { save() }
+        return changed
+    }
     func setRating(for item: CollectionItem, value: Int?, participant: CollaboratorIdentity) {
         guard role(for: item.collectionID) != .viewer || hasCollectionMembership(item.collectionID) else { return }
         let itemID = item.id; let participantID = participant.id
@@ -413,10 +447,13 @@ actor CollectionBackgroundRepository {
     func markMutations(withIDs ids: Set<UUID>, error: Error) { let records = pendingMutations().filter { ids.contains($0.id) }; for record in records { record.attempts += 1; record.lastError = error.localizedDescription }; if !records.isEmpty { save() } }
     func setSyncState(collectionID: UUID, state: CollectionSyncState, error: String? = nil, lastSyncedAt: Date? = nil) { let id = collectionID; let record: CloudSyncStateRecord; if let existing = try? context.fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first { record = existing } else { record = CloudSyncStateRecord(collectionID: id); context.insert(record) }; record.state = state; record.lastError = error; if let lastSyncedAt { record.lastSyncedAt = lastSyncedAt }; record.pendingCount = pendingMutations().filter { $0.collectionID == id }.count; save() }
     func syncState(for collectionID: UUID) -> (CollectionSyncState, String?, Int) { let id = collectionID; guard let state = try? context.fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first else { return (.idle, nil, 0) }; return (state.state, state.lastError, state.pendingCount) }
-    func merge(_ snapshots: [CloudCollectionSnapshot]) {
+    @discardableResult
+    func merge(_ snapshots: [CloudCollectionSnapshot]) -> CloudMergeNotificationChanges {
+        var notificationChanges = CloudMergeNotificationChanges()
         for snapshot in snapshots {
             let collectionID = snapshot.collection.id
             let existingCollection = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first
+            let canReportSharedItemChanges = existingCollection != nil
             if let existingCollection {
                 existingCollection.name = snapshot.collection.name; existingCollection.icon = snapshot.collection.icon; existingCollection.subtitle = snapshot.collection.subtitle; existingCollection.updatedAt = .now
                 let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
@@ -431,7 +468,26 @@ actor CollectionBackgroundRepository {
             for item in snapshot.items {
                 if let record = itemsByID[item.id] {
                     if item.updatedAt >= record.updatedAt { record.update(from: item) }
-                } else { let record = ItemRecord(from: item); context.insert(record); itemsByID[item.id] = record }
+                } else {
+                    let record = ItemRecord(from: item)
+                    context.insert(record)
+                    itemsByID[item.id] = record
+                    if canReportSharedItemChanges {
+                        notificationChanges.sharedItemChanges.append(SharedCollectionItemChange(collectionID: collectionID, collectionName: snapshot.collection.name, itemTitle: item.title, kind: .added))
+                    }
+                }
+            }
+            for itemID in snapshot.deletedItemIDs {
+                guard let record = itemsByID[itemID] else { continue }
+                notificationChanges.sharedItemChanges.append(SharedCollectionItemChange(collectionID: collectionID, collectionName: snapshot.collection.name, itemTitle: record.title, kind: .removed))
+                let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
+                let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
+                let events = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
+                ratings.forEach(context.delete)
+                comments.forEach(context.delete)
+                events.forEach(context.delete)
+                context.delete(record)
+                itemsByID[itemID] = nil
             }
             let existingRatings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             let snapshotRatingKeys = Set(snapshot.ratings.map { "\($0.itemID.uuidString)|\($0.participantID)" })
@@ -459,6 +515,7 @@ actor CollectionBackgroundRepository {
             }
         }
         save()
+        return notificationChanges
     }
     private func enqueue(collectionID: UUID, itemID: UUID? = nil, recordName: String, recordType: String, operation: String = "save") { context.insert(SyncMutationRecord(collectionID: collectionID, itemID: itemID, recordName: recordName, recordType: recordType, operation: operation)) }
     private func hasCollectionMembership(_ collectionID: UUID) -> Bool { let id = collectionID; return ((try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id }))) ?? []).isEmpty == false }

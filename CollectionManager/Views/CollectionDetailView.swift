@@ -3,31 +3,37 @@ import UniformTypeIdentifiers
 
 struct CollectionDetailView: View {
     @Environment(AppStore.self) private var store
-    @State private var showingAddItem = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
-    @State private var showingImporter = false; @State private var showingImportReview = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var drafts: [ImportDraft] = []; @State private var isImporting = false
+    @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
+    @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportTable: CSVImportTable?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
     var body: some View {
         @Bindable var store = store
         ScrollView { VStack(alignment: .leading, spacing: 20) { header; syncBanner; stats; filterBar; if store.isBulkOperationInProgress { ProgressView("Deleting items…").frame(maxWidth: .infinity).padding() }; if isImporting { ProgressView("Reading import…").frame(maxWidth: .infinity).padding() }; LazyVStack(spacing: 12) { ForEach(store.visibleItems) { ItemCard(item: $0) } } }.padding(.horizontal).padding(.bottom, 24) }
-            .background(Color(uiColor: .systemGroupedBackground)).navigationTitle(store.selectedCollection?.name ?? "Collection").navigationBarTitleDisplayMode(.inline).searchable(text: $store.searchText, prompt: "Search items, brands, tags…")
+            .background(Color(uiColor: .systemGroupedBackground)).navigationTitle(store.selectedCollection?.name ?? "Collection").navigationBarTitleDisplayMode(.inline).searchable(text: $store.searchText, prompt: "Search items, metadata, tags…")
             .toolbar { ToolbarItemGroup(placement: .topBarTrailing) { Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); Button { showingEditCollection = true } label: { Label("Edit collection", systemImage: "pencil") }; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
+            .sheet(isPresented: $showingBulkEdit) { BulkEditItemsView(items: store.visibleItems) }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .text], allowsMultipleSelection: false) { result in
                 guard case .success(let urls) = result, let url = urls.first else { return }
                 isImporting = true
                 Task {
                     let parsed = await Task.detached(priority: .userInitiated) {
-                        guard url.startAccessingSecurityScopedResource() else { return [ImportDraft]() }
+                        guard url.startAccessingSecurityScopedResource() else { return (table: CSVImportTable?.none, error: String?.some("The selected file could not be accessed.")) }
                         defer { url.stopAccessingSecurityScopedResource() }
-                        guard let data = try? Data(contentsOf: url) else { return [] }
-                        return (try? CollectionImporter().parseCSV(data)) ?? []
+                        do {
+                            let table = try CollectionImporter().parseTable(Data(contentsOf: url))
+                            guard !table.headers.isEmpty else { return (table: CSVImportTable?.none, error: String?.some("The CSV file does not contain a header row.")) }
+                            return (table: CSVImportTable?.some(table), error: String?.none)
+                        } catch {
+                            return (table: CSVImportTable?.none, error: String?.some(error.localizedDescription))
+                        }
                     }.value
-                    drafts = parsed
                     isImporting = false
-                    showingImportReview = !parsed.isEmpty
+                    csvImportTable = parsed.table
+                    csvImportError = parsed.error
                 }
             }
-            .sheet(isPresented: $showingImportReview) { ImportReviewView(drafts: drafts) }
+            .sheet(item: $csvImportTable) { table in CSVMappingView(table: table) }
             .sheet(isPresented: $showingHTMLImporter) { HTMLImportView() }
             .sheet(isPresented: $showingWebSync) { WebSyncListView() }
             .sheet(isPresented: $showingTagManager) { if let collection = store.selectedCollection { TagManagementView(collection: collection) } }
@@ -42,6 +48,11 @@ struct CollectionDetailView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(store.syncError ?? "The sync error is no longer active.")
+            }
+            .alert("CSV import failed", isPresented: Binding(get: { csvImportError != nil }, set: { if !$0 { csvImportError = nil } })) {
+                Button("OK") { csvImportError = nil }
+            } message: {
+                Text(csvImportError ?? "The file could not be read.")
             }
     }
     private var header: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text("Your shared shelf").font(.title2.bold()); Text("Everything you want to remember, together.").foregroundStyle(.secondary) }; Spacer(); Image(systemName: store.selectedCollection?.icon ?? "square.stack").font(.system(size: 32)).foregroundStyle(.pink).padding(14).background(.pink.opacity(0.12), in: .circle) } }
@@ -101,6 +112,11 @@ struct CollectionDetailView: View {
                     Label(store.itemSortLabel, systemImage: "arrow.up.arrow.down")
                 }
                 .buttonStyle(.bordered)
+                Button { showingBulkEdit = true } label: {
+                    Label("Edit \(store.visibleItems.count) items", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.visibleItems.isEmpty || store.selectedCollection?.role.canEdit != true)
             }
         }
     }

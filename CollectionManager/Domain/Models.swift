@@ -177,6 +177,8 @@ enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
     case text
     case number
     case date
+    case boolean
+    case color
 
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
@@ -185,6 +187,8 @@ enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
         case .text: "textformat"
         case .number: "number"
         case .date: "calendar"
+        case .boolean: "checkmark.circle"
+        case .color: "paintpalette"
         }
     }
 }
@@ -193,16 +197,36 @@ struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var name: String
     var type: MetadataFieldType
+    var showsInItemRows: Bool
 
-    init(id: UUID = UUID(), name: String = "New field", type: MetadataFieldType = .text) {
+    nonisolated init(id: UUID = UUID(), name: String = "New field", type: MetadataFieldType = .text, showsInItemRows: Bool = false) {
         self.id = id
         self.name = name
         self.type = type
+        self.showsInItemRows = showsInItemRows
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, type, showsInItemRows }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        type = try container.decode(MetadataFieldType.self, forKey: .type)
+        showsInItemRows = try container.decodeIfPresent(Bool.self, forKey: .showsInItemRows) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+        try container.encode(showsInItemRows, forKey: .showsInItemRows)
     }
 
     // Values are keyed by identity rather than name so renaming a field keeps
     // the metadata already entered on every item in the collection.
-    var storageKey: String { "customField.\(id.uuidString)" }
+    nonisolated var storageKey: String { "customField.\(id.uuidString)" }
 }
 
 struct CollectionModel: Identifiable, Hashable, Sendable {

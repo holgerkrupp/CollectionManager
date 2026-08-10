@@ -1,6 +1,6 @@
 import Foundation
 
-enum HTMLImportField: String, CaseIterable, Identifiable, Sendable {
+enum HTMLImportField: String, CaseIterable, Codable, Identifiable, Sendable {
     case title, brand, variant, description, state, quantity, barcode, tags, ignore
     var id: String { rawValue }
     var label: String { switch self { case .title: "Title"; case .brand: "Brand"; case .variant: "Variant"; case .description: "Description"; case .state: "State"; case .quantity: "Quantity"; case .barcode: "Barcode"; case .tags: "Tags"; case .ignore: "Ignore" } }
@@ -28,9 +28,26 @@ struct HTMLImporter {
         return tables
     }
 
-    func suggestMapping(headers: [String]) -> [HTMLImportField] { headers.map { header in let value = header.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current); if value.contains("brand") || value.contains("marke") { return .brand }; if value.contains("variant") || value.contains("flavour") || value.contains("geschmack") || value.contains("flavor") { return .variant }; if value.contains("status") || value.contains("state") || value.contains("zustand") { return .state }; if value.contains("quantity") || value.contains("count") || value.contains("anzahl") { return .quantity }; if value.contains("barcode") || value.contains("ean") || value.contains("upc") { return .barcode }; if value.contains("tag") || value.contains("label") || value.contains("kategorie") { return .tags }; if value.contains("description") || value.contains("notes") || value.contains("url") || value == "href" { return .description }; if value.contains("title") || value.contains("name") || value.contains("product") || value.contains("getränk") || value.contains("drink") || value == "text" { return .title }; return .ignore } }
+    func suggestMapping(for table: HTMLImportTable, existingMetadataFields: [MetadataFieldDefinition] = []) -> [ImportColumnDestination] {
+        CollectionImporter().suggestMapping(
+            for: CSVImportTable(headers: table.headers, rows: table.rows),
+            existingMetadataFields: existingMetadataFields
+        )
+    }
 
-    func drafts(from table: HTMLImportTable, mapping: [HTMLImportField]) -> [ImportDraft] { let sourceIndex = table.headers.firstIndex { $0.localizedCaseInsensitiveContains("url") || $0.localizedCaseInsensitiveContains("source") || $0.localizedCaseInsensitiveCompare("href") == .orderedSame }; return table.rows.compactMap { row in func value(_ field: HTMLImportField) -> String { guard let index = mapping.firstIndex(of: field), index < row.count else { return "" }; return row[index].trimmingCharacters(in: .whitespacesAndNewlines) }; let title = value(.title); guard !title.isEmpty else { return nil }; let rawState = value(.state).lowercased(); let state = rawState.isEmpty ? .wanted : (rawState.contains("storage") || rawState.contains("lager") ? .stored : rawState.contains("consum") || rawState.contains("getrun") ? .consumed : ItemState(rawValue: rawState)); let sourceIdentifier = sourceIndex.flatMap { $0 < row.count ? row[$0] : nil }; return ImportDraft(title: title, brand: value(.brand), variant: value(.variant), description: value(.description), state: state, quantity: max(Int(value(.quantity)) ?? 1, 1), tags: value(.tags).split(whereSeparator: { $0 == "," || $0 == "|" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, barcode: Barcode(rawValue: value(.barcode)), sourceIdentifier: sourceIdentifier) } }
+    func prepareImport(from table: HTMLImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition]) -> ImportPreparation {
+        let sourceIndex = table.headers.firstIndex {
+            $0.localizedCaseInsensitiveContains("url") ||
+            $0.localizedCaseInsensitiveContains("source") ||
+            $0.localizedCaseInsensitiveCompare("href") == .orderedSame
+        }
+        return CollectionImporter().prepareImport(
+            from: CSVImportTable(headers: table.headers, rows: table.rows),
+            mapping: mapping,
+            existingMetadataFields: existingMetadataFields,
+            sourceIdentifierColumn: sourceIndex
+        )
+    }
 
     private func parseTables(_ html: String) -> [HTMLImportTable] { let tablePattern = #"(?is)<table\b[^>]*>(.*?)</table>"#; let tableMatches = matches(tablePattern, in: html); return tableMatches.enumerated().compactMap { index, tableHTML in let rowMatches = matches(#"(?is)<tr\b[^>]*>(.*?)</tr>"#, in: tableHTML); let rows = rowMatches.map { matches(#"(?is)<t[hd]\b[^>]*>(.*?)</t[hd]>"#, in: $0).map(clean) }.filter { $0.count > 0 }; guard let headers = rows.first, rows.count > 1 else { return nil }; return HTMLImportTable(name: "Table \(index + 1)", headers: headers, rows: rows.dropFirst().map { Array($0) }) } }
 

@@ -1,12 +1,44 @@
 import SwiftUI
 import PhotosUI
 
+private enum MetadataColorCodec {
+    static func color(from value: MetadataValue?) -> Color? {
+        guard case .string(let rawValue)? = value else { return nil }
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let namedColors: [String: Color] = [
+            "black": .black, "white": .white, "gray": .gray, "grey": .gray,
+            "silver": Color(red: 0.75, green: 0.75, blue: 0.75), "gold": Color(red: 0.83, green: 0.69, blue: 0.22),
+            "red": .red, "orange": .orange, "yellow": .yellow, "green": .green,
+            "mint": .mint, "teal": .teal, "cyan": .cyan, "blue": .blue,
+            "indigo": .indigo, "purple": .purple, "pink": .pink, "brown": .brown
+        ]
+        if let named = namedColors[value] { return named }
+        let hex = value.hasPrefix("#") ? String(value.dropFirst()) : value
+        guard hex.count == 6 || hex.count == 8, let number = UInt64(hex, radix: 16) else { return nil }
+        let red = Double((number >> (hex.count == 8 ? 24 : 16)) & 0xff) / 255
+        let green = Double((number >> (hex.count == 8 ? 16 : 8)) & 0xff) / 255
+        let blue = Double((number >> (hex.count == 8 ? 8 : 0)) & 0xff) / 255
+        let opacity = hex.count == 8 ? Double(number & 0xff) / 255 : 1
+        return Color(red: red, green: green, blue: blue, opacity: opacity)
+    }
+
+    static func hex(from color: Color) -> String {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return "#007AFF" }
+        return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
+    }
+}
+
 struct ItemCard: View {
     @Environment(AppStore.self) private var store
     let item: CollectionItem
     @State private var showingEdit = false
     var body: some View {
         let status = store.status(for: item.state)
+        let rowMetadataFields = store.selectedCollection?.metadataFields.filter(\.showsInItemRows) ?? []
         HStack(spacing: 14) {
             ItemThumbnail(item: item, tint: status.color.color)
             VStack(alignment: .leading, spacing: 4) {
@@ -14,6 +46,9 @@ struct ItemCard: View {
                 Text([item.brand, item.variant].filter { !$0.isEmpty }.joined(separator: " · ")).foregroundStyle(.secondary)
                 if !item.itemDescription.isEmpty { LinkedText(item.itemDescription).font(.subheadline).foregroundStyle(.secondary).lineLimit(4) }
                 TagFlowLayout { ForEach(item.tags, id: \.self) { TagChip(title: $0) }; if item.quantity > 1 { Text("×\(item.quantity)").font(.caption).foregroundStyle(.secondary) } }
+                if !rowMetadataFields.isEmpty {
+                    ItemMetadataSummary(item: item, fields: rowMetadataFields)
+                }
                 if !item.ratings.isEmpty { RatingSummary(ratings: item.ratings) }
                 if !item.comments.isEmpty { Label("\(item.comments.count) collaborator comment\(item.comments.count == 1 ? "" : "s")", systemImage: "text.bubble").font(.caption).foregroundStyle(.secondary) }
             }
@@ -29,6 +64,47 @@ struct ItemCard: View {
             }
         }
         .sheet(isPresented: $showingEdit) { EditItemView(item: item) }
+    }
+}
+
+private struct ItemMetadataSummary: View {
+    struct Entry: Identifiable {
+        let field: MetadataFieldDefinition
+        let value: MetadataValue
+        var id: UUID { field.id }
+    }
+
+    let item: CollectionItem
+    let fields: [MetadataFieldDefinition]
+
+    var body: some View {
+        let entries = fields.compactMap { field -> Entry? in
+            guard let value = item.metadata[field.storageKey] else { return nil }
+            if case .string(let text) = value, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+            return Entry(field: field, value: value)
+        }
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(entries) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("\(entry.field.name):")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        if entry.field.type == .color, let color = MetadataColorCodec.color(from: entry.value) {
+                            Circle()
+                                .fill(color)
+                                .overlay(Circle().stroke(.secondary.opacity(0.35), lineWidth: 1))
+                                .frame(width: 10, height: 10)
+                        }
+                        Text(entry.value.displayValue)
+                            .foregroundStyle(.primary)
+                    }
+                    .font(.caption)
+                    .lineLimit(2)
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 }
 
@@ -371,6 +447,54 @@ struct EditItemView: View {
     private func metadataBinding(for key: String) -> Binding<String> { Binding(get: { if case .string(let value) = metadata[key] { return value }; return metadata[key]?.displayValue ?? "" }, set: { metadata[key] = .string($0) }) }
 }
 
+struct BulkEditItemsView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let items: [CollectionItem]
+    @State private var state: ItemState
+
+    init(items: [CollectionItem]) {
+        self.items = items
+        _state = State(initialValue: items.first?.state ?? .wanted)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Filtered items") {
+                    Label("\(items.count) item\(items.count == 1 ? "" : "s") selected", systemImage: "line.3.horizontal.decrease.circle")
+                    Text("This change applies to the current filtered results only.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Change") {
+                    Picker("Status", selection: $state) {
+                        ForEach(store.statuses) { status in
+                            Text(status.name).tag(ItemState(rawValue: status.id))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Bulk edit")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        store.bulkUpdateState(for: items, to: state)
+                        dismiss()
+                    }
+                    .disabled(items.isEmpty || store.selectedCollection?.role.canEdit != true)
+                }
+            }
+            .onAppear {
+                if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first {
+                    state = ItemState(rawValue: first.id)
+                }
+            }
+        }
+    }
+}
+
 private struct CustomMetadataFieldsSection: View {
     let fields: [MetadataFieldDefinition]
     @Binding var metadata: [String: MetadataValue]
@@ -456,6 +580,47 @@ private struct MetadataFieldValueEditor: View {
                     Label("Set \(field.name)", systemImage: "calendar.badge.plus")
                 }
             }
+        case .boolean:
+            if let boolean = Self.booleanValue(for: value) {
+                HStack {
+                    Toggle(field.name, isOn: Binding(
+                        get: { Self.booleanValue(for: value) ?? boolean },
+                        set: { value = .boolean($0) }
+                    ))
+                    Button(role: .destructive) { value = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear \(field.name)")
+                }
+            } else {
+                Button { value = .boolean(false) } label: {
+                    Label("Set \(field.name)", systemImage: "checkmark.circle")
+                }
+            }
+        case .color:
+            if let selectedColor = MetadataColorCodec.color(from: value) {
+                HStack {
+                    ColorPicker(field.name, selection: Binding(
+                        get: { MetadataColorCodec.color(from: value) ?? selectedColor },
+                        set: { value = .string(MetadataColorCodec.hex(from: $0)) }
+                    ), supportsOpacity: false)
+                    Button(role: .destructive) { value = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear \(field.name)")
+                }
+            } else if let importedValue = value?.displayValue, !importedValue.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    LabeledContent(field.name, value: importedValue)
+                    Button("Choose color") { value = .string("#007AFF") }
+                }
+            } else {
+                Button { value = .string("#007AFF") } label: {
+                    Label("Set \(field.name)", systemImage: "paintpalette")
+                }
+            }
         }
     }
 
@@ -471,6 +636,21 @@ private struct MetadataFieldValueEditor: View {
         formatter.maximumFractionDigits = 16
         return formatter
     }()
+
+    private static func booleanValue(for value: MetadataValue?) -> Bool? {
+        switch value {
+        case .boolean(let boolean): return boolean
+        case .integer(let number): return number != 0
+        case .decimal(let number): return number != 0
+        case .string(let text):
+            switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "y", "1", "on": return true
+            case "false", "no", "n", "0", "off": return false
+            default: return nil
+            }
+        default: return nil
+        }
+    }
 
     private static func numberText(for value: MetadataValue?) -> String {
         switch value {

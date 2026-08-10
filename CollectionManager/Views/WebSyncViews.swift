@@ -81,7 +81,7 @@ struct WebSyncEditorView: View {
     @State private var urlString: String
     @State private var tables: [HTMLImportTable] = []
     @State private var selectedTable = 0
-    @State private var mapping: [HTMLImportField]
+    @State private var mapping: [ImportColumnDestination]
     @State private var intervalMinutes: Int
     @State private var addNewItems: Bool
     @State private var updateExistingStates: Bool
@@ -123,11 +123,19 @@ struct WebSyncEditorView: View {
                         Picker("Object table", selection: $selectedTable) {
                             ForEach(Array(tables.enumerated()), id: \.offset) { index, table in Text("\(table.name) · \(table.rows.count) objects").tag(index) }
                         }
-                        .onChange(of: selectedTable) { _, index in mapping = HTMLImporter().suggestMapping(headers: tables[index].headers) }
+                        .onChange(of: selectedTable) { _, index in
+                            mapping = HTMLImporter().suggestMapping(for: tables[index], existingMetadataFields: store.selectedCollection?.metadataFields ?? [])
+                        }
                         ForEach(Array(tables[selectedTable].headers.enumerated()), id: \.offset) { index, header in
-                            Picker(header, selection: Binding(get: { mapping.indices.contains(index) ? mapping[index] : .ignore }, set: { if mapping.indices.contains(index) { mapping[index] = $0 } })) {
-                                ForEach(HTMLImportField.allCases) { Text($0.label).tag($0) }
-                            }
+                            ImportColumnMappingPicker(
+                                header: header,
+                                sample: sampleValues(for: index),
+                                existingMetadataFields: store.selectedCollection?.metadataFields ?? [],
+                                destination: Binding(
+                                    get: { mapping.indices.contains(index) ? mapping[index] : .ignore },
+                                    set: { setMapping($0, at: index) }
+                                )
+                            )
                         }
                     }
                 }
@@ -154,7 +162,7 @@ struct WebSyncEditorView: View {
             .navigationTitle(existingSync == nil ? "New web sync" : "Edit web sync")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(tables.isEmpty || !mapping.contains(.title)) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(tables.isEmpty || !mapping.contains(.standard(.title))) }
             }
             .task { if tables.isEmpty { load() } }
             .alert("Could not read source", isPresented: Binding(get: { errorMessage != nil && tables.isEmpty }, set: { if !$0 { errorMessage = nil } })) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "") }
@@ -162,17 +170,23 @@ struct WebSyncEditorView: View {
     }
 
     private func save() {
-        guard !tables.isEmpty else { return }
+        guard !tables.isEmpty, let collection = store.selectedCollection, collection.id == collectionID else {
+            errorMessage = "Select the collection before saving this web sync."
+            return
+        }
         let table = tables[selectedTable]
+        let preparation = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: collection.metadataFields)
+        store.addMetadataFields(preparation.newMetadataFields)
+        let persistedMapping = resolvedMapping(using: preparation.newMetadataFields)
         if let existingSync {
             existingSync.urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
             existingSync.tableName = table.name
             existingSync.headersJSON = (try? String(data: JSONEncoder().encode(table.headers), encoding: .utf8)) ?? "[]"
-            existingSync.mappingJSON = (try? String(data: JSONEncoder().encode(mapping.map(\.rawValue)), encoding: .utf8)) ?? "[]"
+            existingSync.mappingJSON = (try? String(data: JSONEncoder().encode(persistedMapping), encoding: .utf8)) ?? "[]"
             existingSync.intervalMinutes = intervalMinutes; existingSync.addNewItems = addNewItems; existingSync.updateExistingStates = updateExistingStates; existingSync.fixedStateRawValue = fixedState?.rawValue; existingSync.tagSeparators = tagSeparators; existingSync.splitTagsOnWhitespace = splitTagsOnWhitespace; existingSync.generateTagsFromTitle = generateTagsFromTitle; existingSync.titleTagModeRawValue = titleTagMode.rawValue; existingSync.titleSeparators = titleSeparators
             store.updateWebSync(existingSync)
         } else {
-            store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: mapping, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+            store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: persistedMapping, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
         }
         dismiss()
     }
@@ -193,7 +207,11 @@ struct WebSyncEditorView: View {
                     tables = loaded
                     selectedTable = existingSync.flatMap { sync in loaded.firstIndex { $0.name == sync.tableName } } ?? 0
                     let table = loaded[selectedTable]
-                    if let existingSync, existingSync.mapping.count == table.headers.count { mapping = existingSync.mapping } else { mapping = HTMLImporter().suggestMapping(headers: table.headers) }
+                    if let existingSync, existingSync.mapping.count == table.headers.count {
+                        mapping = existingSync.mapping
+                    } else {
+                        mapping = HTMLImporter().suggestMapping(for: table, existingMetadataFields: store.selectedCollection?.metadataFields ?? [])
+                    }
                     isLoading = false
                 }
             } catch { await MainActor.run { errorMessage = error.localizedDescription; isLoading = false } }
@@ -204,5 +222,32 @@ struct WebSyncEditorView: View {
         var options = TagGenerationOptions()
         options.separators = tagSeparators; options.splitOnWhitespace = splitTagsOnWhitespace; options.generateFromTitle = generateTagsFromTitle; options.titleMode = titleTagMode; options.titleSeparators = titleSeparators
         return options
+    }
+
+    private func setMapping(_ destination: ImportColumnDestination, at index: Int) {
+        guard mapping.indices.contains(index) else { return }
+        switch destination {
+        case .standard(let field):
+            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .standard(field) { mapping[otherIndex] = .ignore }
+        case .existingMetadata(let fieldID):
+            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .existingMetadata(fieldID) { mapping[otherIndex] = .ignore }
+        default: break
+        }
+        mapping[index] = destination
+    }
+
+    private func sampleValues(for column: Int) -> String {
+        guard tables.indices.contains(selectedTable) else { return "" }
+        let values = tables[selectedTable].rows.compactMap { column < $0.count ? $0[column].trimmingCharacters(in: .whitespacesAndNewlines) : nil }.filter { !$0.isEmpty }
+        return values.isEmpty ? "No populated values" : values.prefix(3).joined(separator: " · ")
+    }
+
+    private func resolvedMapping(using newFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {
+        var fieldIndex = 0
+        return mapping.map { destination in
+            guard case .newMetadata = destination, fieldIndex < newFields.count else { return destination }
+            defer { fieldIndex += 1 }
+            return .existingMetadata(newFields[fieldIndex].id)
+        }
     }
 }

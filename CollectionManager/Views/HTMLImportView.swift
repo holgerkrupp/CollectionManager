@@ -52,8 +52,9 @@ struct HTMLMappingView: View {
     @Environment(\.dismiss) private var dismiss
     let table: HTMLImportTable
     let sourceURL: String
-    @State private var mapping: [HTMLImportField]
-    @State private var showingReview = false
+    @State private var mapping: [ImportColumnDestination]
+    @State private var preparation: ImportPreparation?
+    @State private var didSuggestMapping = false
     @State private var fixedState: ItemState?
     @State private var saveForBackgroundSync = false
     @State private var intervalMinutes = 360
@@ -65,13 +66,21 @@ struct HTMLMappingView: View {
     @State private var titleTagMode: TitleTagMode = .firstSegment
     @State private var titleSeparators = "-–—_:|/,"
 
-    init(table: HTMLImportTable, sourceURL: String = "") { self.table = table; self.sourceURL = sourceURL; _mapping = State(initialValue: HTMLImporter().suggestMapping(headers: table.headers)) }
+    init(table: HTMLImportTable, sourceURL: String = "") { self.table = table; self.sourceURL = sourceURL; _mapping = State(initialValue: Array(repeating: .ignore, count: table.headers.count)) }
 
     var body: some View {
         Form {
             Section("Map columns") {
                 ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
-                    Picker(header, selection: Binding(get: { mapping[index] }, set: { mapping[index] = $0 })) { ForEach(HTMLImportField.allCases) { Text($0.label).tag($0) } }
+                    ImportColumnMappingPicker(
+                        header: header,
+                        sample: sampleValues(for: index),
+                        existingMetadataFields: store.selectedCollection?.metadataFields ?? [],
+                        destination: Binding(
+                            get: { mapping.indices.contains(index) ? mapping[index] : .ignore },
+                            set: { setMapping($0, at: index) }
+                        )
+                    )
                 }
             }
             Section("Preview") {
@@ -129,27 +138,39 @@ struct HTMLMappingView: View {
             Section { Text("Suggestions are based on column names. You can change every mapping before reviewing the imported objects.").font(.footnote).foregroundStyle(.secondary) }
         }
         .navigationTitle("Map columns")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Review") { showingReview = true }.disabled(!mapping.contains(.title)) } }
-        .sheet(isPresented: $showingReview) {
-            ImportReviewView(drafts: mappedDrafts, useSourceDeduplication: true) {
-                saveBackgroundSyncIfNeeded()
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Review") { preparation = makePreparation() }.disabled(!mapping.contains(.standard(.title))) } }
+        .onAppear {
+            guard !didSuggestMapping else { return }
+            mapping = HTMLImporter().suggestMapping(for: table, existingMetadataFields: store.selectedCollection?.metadataFields ?? [])
+            didSuggestMapping = true
+        }
+        .sheet(item: $preparation) { preparation in
+            ImportReviewView(
+                drafts: preparation.drafts,
+                useSourceDeduplication: true,
+                metadataFieldsToCreate: preparation.newMetadataFields,
+                metadataFields: preparation.metadataFields
+            ) {
+                saveBackgroundSyncIfNeeded(preparation: preparation)
             }
         }
     }
 
     private var previewDrafts: [ImportDraft] {
-        Array(mappedDrafts.prefix(5))
+        Array(makePreparation().drafts.prefix(5))
     }
 
-    private var mappedDrafts: [ImportDraft] {
-        var drafts = HTMLImporter().drafts(from: table, mapping: mapping)
+    private func makePreparation() -> ImportPreparation {
+        let fields = store.selectedCollection?.metadataFields ?? []
+        let prepared = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: fields)
+        var drafts = prepared.drafts
         if let fixedState {
             for index in drafts.indices { drafts[index].state = fixedState }
         }
         for index in drafts.indices {
             drafts[index].tags = TagUtilities.tags(title: drafts[index].title, existing: drafts[index].tags, rawTags: drafts[index].tags.joined(separator: ","), options: tagOptions)
         }
-        return drafts
+        return ImportPreparation(drafts: drafts, newMetadataFields: prepared.newMetadataFields, metadataFields: prepared.metadataFields)
     }
 
     private var tagOptions: TagGenerationOptions {
@@ -164,12 +185,38 @@ struct HTMLMappingView: View {
 
     private var canSaveBackgroundSync: Bool {
         guard let url = URL(string: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
-        return (url.scheme == "http" || url.scheme == "https") && store.selectedCollection != nil && mapping.contains(.title)
+        return (url.scheme == "http" || url.scheme == "https") && store.selectedCollection != nil && mapping.contains(.standard(.title))
     }
 
-    private func saveBackgroundSyncIfNeeded() {
+    private func saveBackgroundSyncIfNeeded(preparation: ImportPreparation) {
         guard saveForBackgroundSync, canSaveBackgroundSync, let collectionID = store.selectedCollection?.id else { return }
-        store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name, headers: table.headers, mapping: mapping, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+        store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name, headers: table.headers, mapping: resolvedMapping(using: preparation.newMetadataFields), intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+    }
+
+    private func resolvedMapping(using newFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {
+        var fieldIndex = 0
+        return mapping.map { destination in
+            guard case .newMetadata = destination, fieldIndex < newFields.count else { return destination }
+            defer { fieldIndex += 1 }
+            return .existingMetadata(newFields[fieldIndex].id)
+        }
+    }
+
+    private func setMapping(_ destination: ImportColumnDestination, at index: Int) {
+        guard mapping.indices.contains(index) else { return }
+        switch destination {
+        case .standard(let field):
+            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .standard(field) { mapping[otherIndex] = .ignore }
+        case .existingMetadata(let fieldID):
+            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .existingMetadata(fieldID) { mapping[otherIndex] = .ignore }
+        default: break
+        }
+        mapping[index] = destination
+    }
+
+    private func sampleValues(for column: Int) -> String {
+        let values = table.rows.compactMap { column < $0.count ? $0[column].trimmingCharacters(in: .whitespacesAndNewlines) : nil }.filter { !$0.isEmpty }
+        return values.isEmpty ? "No populated values" : values.prefix(3).joined(separator: " · ")
     }
 
     private func intervalLabel(_ minutes: Int) -> String {

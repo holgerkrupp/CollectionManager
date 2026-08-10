@@ -57,6 +57,12 @@ import SwiftData
     func select(_ collectionID: UUID?) { guard let collectionID, let collection = collections.first(where: { $0.id == collectionID }), selectedCollection?.id != collectionID else { return }; selectedCollection = collection; selectedState = nil; selectedBrand = nil; itemSort = .updatedDescending; Task { await loadSelectedCollectionInBackground() } }
     func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) { repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); loadCollections(); loadSelectedCollection() }
     func updateCollection(_ collection: CollectionModel) { repository?.updateCollection(collection); loadCollections(); loadSelectedCollection() }
+    func addMetadataFields(_ fields: [MetadataFieldDefinition]) {
+        guard var collection = selectedCollection, collection.role.canEdit, !fields.isEmpty else { return }
+        let existingIDs = Set(collection.metadataFields.map(\.id))
+        collection.metadataFields.append(contentsOf: fields.filter { !existingIDs.contains($0.id) })
+        updateCollection(collection)
+    }
     func deleteCollection(_ collection: CollectionModel) async {
         guard collection.role.canDelete, let backgroundRepository else { return }
         let previousCollections = collections
@@ -76,6 +82,13 @@ import SwiftData
         }
     }
     func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil) { guard let collectionID = selectedCollection?.id else { return }; let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier); repository?.addItem(item); items.insert(item, at: 0) }
+    @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int {
+        guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
+        guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return 0 }
+        let changed = repository.bulkUpdateState(for: Set(filteredItems.map(\.id)), in: collection.id, to: state)
+        if changed > 0 { loadSelectedCollection() }
+        return changed
+    }
     func importDrafts(_ drafts: [ImportDraft]) { guard let repository, let collectionID = selectedCollection?.id else { return }; let entries = drafts.map { draft in (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)") }; repository.importDrafts(entries, collectionID: collectionID); loadSelectedCollection() }
     func deduplicateImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deduplicateItems(in: collectionID); loadSelectedCollection(); return removed }
     func deleteAllImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed }
@@ -122,7 +135,8 @@ import SwiftData
         let mutationIDs = Set(mutations.map(\.id))
         do {
             let snapshots = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
-            repository.merge(snapshots)
+            let notificationChanges = repository.merge(snapshots)
+            LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
             repository.removeMutations(withIDs: mutationIDs)
             repository.setSyncState(collectionID: selectedCollection?.id ?? localCollections.first?.id ?? UUID(), state: .idle, lastSyncedAt: .now)
             syncState = .idle; pendingSyncCount = 0; loadCollections(); await loadSelectedCollectionInBackground()
@@ -229,6 +243,10 @@ import SwiftData
             return valuesSort(metadataNumber(left), metadataNumber(right), lhs: lhs, rhs: rhs, direction: direction)
         case .date:
             return valuesSort(metadataDate(left), metadataDate(right), lhs: lhs, rhs: rhs, direction: direction)
+        case .boolean:
+            return valuesSort(metadataBoolean(left), metadataBoolean(right), lhs: lhs, rhs: rhs, direction: direction)
+        case .color:
+            return textValuesSort(metadataText(left), metadataText(right), lhs: lhs, rhs: rhs, direction: direction)
         }
     }
     private func valuesSort<Value: Comparable>(_ left: Value?, _ right: Value?, lhs: CollectionItem, rhs: CollectionItem, direction: SortDirection) -> Bool {
@@ -268,6 +286,20 @@ import SwiftData
     private func metadataDate(_ value: MetadataValue?) -> Date? {
         if case .date(let date)? = value { return date }
         return nil
+    }
+    private func metadataBoolean(_ value: MetadataValue?) -> Int? {
+        switch value {
+        case .boolean(let boolean): return boolean ? 1 : 0
+        case .integer(let number): return number == 0 ? 0 : 1
+        case .decimal(let number): return number == 0 ? 0 : 1
+        case .string(let text):
+            switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "y", "1", "on": return 1
+            case "false", "no", "n", "0", "off": return 0
+            default: return nil
+            }
+        default: return nil
+        }
     }
     private static let metadataNumberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()

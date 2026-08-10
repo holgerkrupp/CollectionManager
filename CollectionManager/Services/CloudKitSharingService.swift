@@ -24,6 +24,7 @@ enum SharingError: LocalizedError {
 struct CloudCollectionSnapshot: Sendable {
     let collection: CollectionModel
     let items: [CollectionItem]
+    let deletedItemIDs: [UUID]
     let events: [ItemEvent]
     let ratings: [ItemRating]
     let comments: [ItemComment]
@@ -66,36 +67,77 @@ final class CloudKitSharingService {
             _ = try await database.save(CKRecordZone(zoneID: zoneID))
         }
         let rootID = CKRecord.ID(recordName: collection.id.uuidString, zoneID: zoneID)
-        let root = (try? await database.record(for: rootID)) ?? CKRecord(recordType: "Collection", recordID: rootID)
-        root["name"] = collection.name as CKRecordValue; root["icon"] = collection.icon as CKRecordValue; root["subtitle"] = collection.subtitle as CKRecordValue; root["settingsJSON"] = settingsJSON(for: collection) as CKRecordValue; root["updatedAt"] = Date.now as CKRecordValue
         let collectionItems = items.filter { $0.collectionID == collection.id }
         let itemRecords = collectionItems.map { record(for: $0, zoneID: zoneID, parent: rootID) }
         let eventRecords = events.map { record(for: $0, zoneID: zoneID, parent: rootID) }
         let ratingRecords = collectionItems.flatMap { $0.ratings.map { record(for: $0, zoneID: zoneID, parent: CKRecord.ID(recordName: $0.itemID.uuidString, zoneID: zoneID)) } }
         let commentRecords = collectionItems.flatMap { $0.comments.map { record(for: $0, zoneID: zoneID, parent: CKRecord.ID(recordName: $0.itemID.uuidString, zoneID: zoneID)) } }
-
-        // A collection can already have a share if the user dismissed the
-        // controller or opens it again later. Creating a second CKShare for the
-        // same root is rejected by CloudKit, so reuse the existing record.
-        let existingShare: CKShare? = if let shareID = root.share?.recordID {
-            try await database.record(for: shareID) as? CKShare
-        } else {
-            nil
-        }
-        let share = existingShare ?? CKShare(rootRecord: root)
-        share[CKShare.SystemFieldKey.title] = collection.name as CKRecordValue
-        share.publicPermission = .none
-
-        // The root and a new share must be committed together. Child records are
-        // then upserted in bounded, non-atomic batches. The previous single
-        // operation exceeded CloudKit's record limit for larger collections and
-        // conflicted with records already uploaded by background sync.
-        try await modifyRecords(in: database, saving: [root, share], atomically: true)
+        let share = try await createOrUpdateShare(for: collection, rootID: rootID, database: database)
         let descendants = itemRecords + eventRecords + ratingRecords + commentRecords
         for batch in descendants.chunked(maxCount: 300) {
-            try await modifyRecords(in: database, saving: batch, atomically: false)
+            try await saveRecordsResiliently(batch, in: database)
         }
         return share
+    }
+
+    private func createOrUpdateShare(for collection: CollectionModel, rootID: CKRecord.ID, database: CKDatabase) async throws -> CKShare {
+        var lastError: Error = SharingError.unavailable
+        for attempt in 0..<3 {
+            let root: CKRecord
+            do {
+                root = try await database.record(for: rootID)
+            } catch let error as CKError where error.code == .unknownItem {
+                root = CKRecord(recordType: "Collection", recordID: rootID)
+            }
+            root["name"] = collection.name as CKRecordValue
+            root["icon"] = collection.icon as CKRecordValue
+            root["subtitle"] = collection.subtitle as CKRecordValue
+            root["settingsJSON"] = settingsJSON(for: collection) as CKRecordValue
+            root["updatedAt"] = Date.now as CKRecordValue
+
+            let existingShare: CKShare? = if let shareID = root.share?.recordID {
+                try await database.record(for: shareID) as? CKShare
+            } else {
+                nil
+            }
+            let share = existingShare ?? CKShare(rootRecord: root)
+            share[CKShare.SystemFieldKey.title] = collection.name as CKRecordValue
+            share.publicPermission = .none
+
+            do {
+                try await saveSharePair(root: root, share: share, in: database)
+                return share
+            } catch {
+                lastError = error
+                guard attempt < 2, isRetryableShareConflict(error) else { throw error }
+                await Task.yield()
+            }
+        }
+        throw lastError
+    }
+
+    private func saveSharePair(root: CKRecord, share: CKShare, in database: CKDatabase) async throws {
+        let collector = CloudKitOperationErrorCollector()
+        let operation = CKModifyRecordsOperation(recordsToSave: [root, share], recordIDsToDelete: nil)
+        operation.savePolicy = .changedKeys
+        operation.isAtomic = true
+        operation.perRecordSaveBlock = { _, result in
+            if case .failure(let error) = result { collector.append(error) }
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            operation.modifyRecordsResultBlock = { result in
+                if case .failure(let error) = result { collector.append(error) }
+                continuation.resume()
+            }
+            database.add(operation)
+        }
+        let errors = collector.snapshot().map(underlyingCloudKitCause(in:))
+        if let cause = errors.first(where: { !isBatchFailure($0) }) ?? errors.first { throw cause }
+    }
+
+    private func isRetryableShareConflict(_ error: Error) -> Bool {
+        guard let cloudError = error as? CKError else { return false }
+        return cloudError.code == .serverRecordChanged || cloudError.code == .constraintViolation || isBatchFailure(error)
     }
 
     func controller(for share: CKShare) -> UICloudSharingController { UICloudSharingController(share: share, container: container) }
@@ -175,11 +217,21 @@ final class CloudKitSharingService {
             if shouldSaveCollection {
                 let root = (try? await database.record(for: rootID)) ?? CKRecord(recordType: "Collection", recordID: rootID)
                 root["name"] = collection.name as CKRecordValue; root["icon"] = collection.icon as CKRecordValue; root["subtitle"] = collection.subtitle as CKRecordValue; root["settingsJSON"] = settingsJSON(for: collection) as CKRecordValue; root["updatedAt"] = Date.now as CKRecordValue
-                saving.append(root)
+                // Commit the shared root independently. If a root update fails,
+                // including it with hundreds of descendants turns every child
+                // error into CKError.batchRequestFailed and obscures the cause.
+                // Saving it first also guarantees that new child parents exist.
+                try await modifyRecords(in: database, saving: [root], atomically: false)
             }
 
             let itemIDs = Set(itemMutations.compactMap { $0.itemID ?? UUID(uuidString: $0.recordName) })
-            let collectionItems = shouldBootstrap || shouldSaveCollection ? items.filter { $0.collectionID == collection.id } : items.filter { itemIDs.contains($0.id) }
+            // A collection mutation only changes the root metadata. Re-uploading
+            // every child makes an unrelated stale item poison the entire
+            // custom-zone batch. After the one-time bootstrap, honor the outbox
+            // and save only item records that actually changed.
+            let collectionItems = shouldBootstrap
+                ? items.filter { $0.collectionID == collection.id }
+                : items.filter { itemIDs.contains($0.id) }
             saving.append(contentsOf: collectionItems.map { record(for: $0, zoneID: zone, parent: rootID) })
             let eventItemIDs = Set(collectionItems.map(\.id))
             saving.append(contentsOf: events.filter { eventItemIDs.contains($0.itemID) }.map { record(for: $0, zoneID: zone, parent: rootID) })
@@ -188,19 +240,43 @@ final class CloudKitSharingService {
             let collectionComments = items.filter { $0.collectionID == collection.id }.flatMap(\.comments)
             let ratingNames = Set(ratingMutations.filter { $0.operation != "delete" }.map(\.recordName))
             let commentNames = Set(commentMutations.filter { $0.operation != "delete" }.map(\.recordName))
-            let ratingsToSave = shouldBootstrap || shouldSaveCollection ? collectionRatings : collectionRatings.filter { ratingNames.contains(CollaborationRecordNames.rating(itemID: $0.itemID, participantID: $0.participantID)) }
-            let commentsToSave = shouldBootstrap || shouldSaveCollection ? collectionComments : collectionComments.filter { commentNames.contains(CollaborationRecordNames.comment($0.id)) }
+            let ratingsToSave = shouldBootstrap ? collectionRatings : collectionRatings.filter { ratingNames.contains(CollaborationRecordNames.rating(itemID: $0.itemID, participantID: $0.participantID)) }
+            let commentsToSave = shouldBootstrap ? collectionComments : collectionComments.filter { commentNames.contains(CollaborationRecordNames.comment($0.id)) }
             saving.append(contentsOf: ratingsToSave.map { record(for: $0, zoneID: zone, parent: CKRecord.ID(recordName: $0.itemID.uuidString, zoneID: zone)) })
             saving.append(contentsOf: commentsToSave.map { record(for: $0, zoneID: zone, parent: CKRecord.ID(recordName: $0.itemID.uuidString, zoneID: zone)) })
             // CloudKit has per-operation record limits. Chunking also avoids one
             // large bootstrap monopolizing the sync task.
             for batch in saving.chunked(maxCount: 300) {
-                try await modifyRecords(in: database, saving: batch, atomically: false)
+                try await saveRecordsResiliently(batch, in: database)
             }
             let deleting = deleteMutations.map { CKRecord.ID(recordName: $0.recordName, zoneID: zone) }
             for batch in deleting.chunked(maxCount: 300) {
-                try await modifyRecords(in: database, deleting: batch, atomically: false)
+                try await deleteRecordsResiliently(batch, in: database)
             }
+        }
+    }
+
+    private func saveRecordsResiliently(_ records: [CKRecord], in database: CKDatabase) async throws {
+        do {
+            try await modifyRecords(in: database, saving: records, atomically: false)
+        } catch {
+            guard isBatchFailure(error), records.count > 1 else { throw error }
+            let midpoint = records.count / 2
+            try await saveRecordsResiliently(Array(records[..<midpoint]), in: database)
+            try await saveRecordsResiliently(Array(records[midpoint...]), in: database)
+        }
+    }
+
+    private func deleteRecordsResiliently(_ recordIDs: [CKRecord.ID], in database: CKDatabase) async throws {
+        do {
+            try await modifyRecords(in: database, deleting: recordIDs, atomically: false)
+        } catch let error as CKError where error.code == .unknownItem {
+            // Deleting a record that is already absent is successful convergence.
+        } catch {
+            guard isBatchFailure(error), recordIDs.count > 1 else { throw error }
+            let midpoint = recordIDs.count / 2
+            try await deleteRecordsResiliently(Array(recordIDs[..<midpoint]), in: database)
+            try await deleteRecordsResiliently(Array(recordIDs[midpoint...]), in: database)
         }
     }
 
@@ -267,8 +343,9 @@ final class CloudKitSharingService {
         var snapshots: [CloudCollectionSnapshot] = []
         for zone in zones where zone.zoneID.zoneName != CKRecordZone.default().zoneID.zoneName {
             let zoneRecords: [CKRecord]
+            let deletedItemIDs: [UUID]
             do {
-                zoneRecords = try await records(in: zone.zoneID, database: database)
+                (zoneRecords, deletedItemIDs) = try await records(in: zone.zoneID, database: database)
             } catch let error as CKError where error.code == .unknownItem || error.code == .zoneNotFound {
                 // A newly-created or previously-cleared custom zone has no
                 // Collection type/record yet. It is empty, not a sync failure.
@@ -281,18 +358,19 @@ final class CloudKitSharingService {
                 let ratings = zoneRecords.filter { $0.recordType == "CollectionItemRating" }.compactMap(rating(from:))
                 let comments = zoneRecords.filter { $0.recordType == "CollectionItemComment" }.compactMap(comment(from:))
                 let settings = decodeSettings(root["settingsJSON"] as? String)
-                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, role: database.databaseScope == .shared ? .editor : .owner), items: items, events: events, ratings: ratings, comments: comments))
+                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, role: database.databaseScope == .shared ? .editor : .owner), items: items, deletedItemIDs: deletedItemIDs, events: events, ratings: ratings, comments: comments))
             }
         }
         return snapshots
     }
 
-    private func records(in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> [CKRecord] {
+    private func records(in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> ([CKRecord], [UUID]) {
         // Zone changes enumerate custom-zone records without CKQuery indexes.
         // Passing nil starts from the beginning, which is appropriate here
         // because the local merge currently expects a complete snapshot.
         var changeToken: CKServerChangeToken?
         var records: [CKRecord] = []
+        var deletedItemIDs: [UUID] = []
         var moreComing = true
         while moreComing {
             let page = try await database.recordZoneChanges(
@@ -304,10 +382,13 @@ final class CloudKitSharingService {
             records.append(contentsOf: page.modificationResultsByID.values.compactMap { result in
                 try? result.get().record
             })
+            deletedItemIDs.append(contentsOf: page.deletions
+                .filter { $0.recordType == "CollectionItem" }
+                .compactMap { UUID(uuidString: $0.recordID.recordName) })
             changeToken = page.changeToken
             moreComing = page.moreComing
         }
-        return records
+        return (records, deletedItemIDs)
     }
 
     private func settingsJSON(for collection: CollectionModel) -> String { let payload = CollectionSettingsPayload(category: collection.category, statuses: collection.statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields); return (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}" }
@@ -364,6 +445,23 @@ final class CloudKitSharingService {
     }
     private func item(from record: CKRecord, collectionID: UUID) -> CollectionItem? { guard let id = UUID(uuidString: record.recordID.recordName), let title = record["title"] as? String else { return nil }; return CollectionItem(id: id, collectionID: collectionID, title: title, brand: record["brand"] as? String ?? "", variant: record["variant"] as? String ?? "", itemDescription: record["itemDescription"] as? String ?? "", state: ItemState(rawValue: record["state"] as? String ?? "wanted"), quantity: record["quantity"] as? Int ?? 1, barcode: (record["barcodeValue"] as? String).flatMap { Barcode(rawValue: $0, type: record["barcodeType"] as? String ?? "EAN-13") }, createdAt: record["createdAt"] as? Date ?? .now, updatedAt: record["updatedAt"] as? Date ?? .now, consumedAt: record["consumedAt"] as? Date, tags: decode(record["tagsJSON"] as? String, fallback: []), metadata: decode(record["metadataJSON"] as? String, fallback: [:]), imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: nil) }
     private func decode<T: Decodable>(_ string: String?, fallback: T) -> T { guard let string, let data = string.data(using: .utf8), let value = try? JSONDecoder().decode(T.self, from: data) else { return fallback }; return value }
+}
+
+private final class CloudKitOperationErrorCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var errors: [Error] = []
+
+    func append(_ error: Error) {
+        lock.lock()
+        errors.append(error)
+        lock.unlock()
+    }
+
+    func snapshot() -> [Error] {
+        lock.lock()
+        defer { lock.unlock() }
+        return errors
+    }
 }
 
 private extension Array {

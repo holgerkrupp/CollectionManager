@@ -1,10 +1,66 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @AppStorage("global.defaultCollectionIcon") private var defaultIcon = "square.stack.3d.up.fill"
     @AppStorage("global.confirmDeletes") private var confirmDeletes = true
+    @AppStorage(LocalNotificationPreferences.sharedItemAdded) private var notifySharedItemAdded = false
+    @AppStorage(LocalNotificationPreferences.sharedItemRemoved) private var notifySharedItemRemoved = false
+    @AppStorage(LocalNotificationPreferences.automaticSyncItemAdded) private var notifyAutomaticSyncItemAdded = false
+    @AppStorage(LocalNotificationPreferences.automaticSyncStatusChanged) private var notifyAutomaticSyncStatusChanged = false
     @State private var gamesEANAPIKey = ""
-    var body: some View { NavigationStack { Form { Section("Defaults") { TextField("Default collection icon", text: $defaultIcon); Toggle("Confirm before deleting", isOn: $confirmDeletes) }; Section("Games EAN lookup") { SecureField("API key", text: $gamesEANAPIKey).onChange(of: gamesEANAPIKey) { _, newValue in GamesEANAPIKeyStore.save(newValue) }; Text("Used only for Games collections. Requests go to your Game Collector API at levelcomplete.de. The key is stored in Keychain.").font(.footnote).foregroundStyle(.secondary) }; Section("Account") { Label("iCloud status", systemImage: "icloud"); Text("Cloud sharing uses your private CloudKit database and shared database.").font(.footnote).foregroundStyle(.secondary) } }.navigationTitle("Settings").onAppear { gamesEANAPIKey = GamesEANAPIKeyStore.load() } } }
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Defaults") {
+                    TextField("Default collection icon", text: $defaultIcon)
+                    Toggle("Confirm before deleting", isOn: $confirmDeletes)
+                }
+
+                Section("Notifications") {
+                    Toggle("Another user added an item", isOn: $notifySharedItemAdded)
+                        .onChange(of: notifySharedItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Another user removed an item", isOn: $notifySharedItemRemoved)
+                        .onChange(of: notifySharedItemRemoved) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Automatic sync added an item", isOn: $notifyAutomaticSyncItemAdded)
+                        .onChange(of: notifyAutomaticSyncItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Automatic sync changed a matched item's status", isOn: $notifyAutomaticSyncStatusChanged)
+                        .onChange(of: notifyAutomaticSyncStatusChanged) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    if notificationStatus == .denied {
+                        Text("Notifications are disabled for Collection Manager. Enable them in Settings.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("These preferences are stored only on this device and are never included in iCloud sync.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Games EAN lookup") {
+                    SecureField("API key", text: $gamesEANAPIKey)
+                        .onChange(of: gamesEANAPIKey) { _, newValue in GamesEANAPIKeyStore.save(newValue) }
+                    Text("Used only for Games collections. Requests go to your Game Collector API at levelcomplete.de. The key is stored in Keychain.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Account") {
+                    Label("iCloud status", systemImage: "icloud")
+                    Text("Cloud sharing uses your private CloudKit database and shared database.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Settings")
+            .task {
+                gamesEANAPIKey = GamesEANAPIKeyStore.load()
+                notificationStatus = await LocalNotificationService.shared.authorizationStatus()
+            }
+        }
+    }
 }
 
 struct CollectionSettingsView: View {
@@ -58,7 +114,15 @@ struct CollectionSettingsView: View {
                         NavigationLink {
                             MetadataFieldDefinitionEditorView(field: $field)
                         } label: {
-                            Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
+                            HStack {
+                                Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
+                                Spacer()
+                                if field.showsInItemRows {
+                                    Image(systemName: "eye.fill")
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityLabel("Shown in item rows")
+                                }
+                            }
                         }
                     }
                     .onDelete { metadataFields.remove(atOffsets: $0) }
@@ -128,6 +192,7 @@ struct MetadataFieldDefinitionEditorView: View {
                         Label(type.label, systemImage: type.symbol).tag(type)
                     }
                 }
+                Toggle("Show in item rows", isOn: $field.showsInItemRows)
             }
             Section {
                 Label(field.name.isEmpty ? "Field name" : field.name, systemImage: field.type.symbol)

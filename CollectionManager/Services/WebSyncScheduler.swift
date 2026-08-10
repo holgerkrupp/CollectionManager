@@ -7,7 +7,11 @@ enum WebSyncScheduler {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
             Task { @MainActor in
                 let context = ModelContext(container); let configs = (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.enabled }))) ?? []; var success = true
-                for config in configs { let result = await HTMLSyncCoordinator(context: context).sync(config); if result.error != nil { success = false } }
+                for config in configs {
+                    let result = await HTMLSyncCoordinator(context: context).sync(config)
+                    LocalNotificationService.shared.scheduleAutomaticSyncNotifications(collectionName: result.collectionName, addedItems: result.addedItems, matchedStateChanges: result.matchedStateChanges)
+                    if result.error != nil { success = false }
+                }
                 task.setTaskCompleted(success: success); schedule()
             }
         }
