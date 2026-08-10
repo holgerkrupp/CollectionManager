@@ -428,7 +428,54 @@ final class CloudKitSharingService {
             changeToken = page.changeToken
             moreComing = page.moreComing
         }
+
+        // A participant's first shared-zone change request can succeed before
+        // CloudKit includes the hierarchy's existing records in that feed. In
+        // that case there is no Collection root to merge and the accepted list
+        // remains invisible. Query the current hierarchy as a fallback; later
+        // syncs normally continue to use the cheaper zone-change result.
+        if !records.contains(where: { $0.recordType == "Collection" }) {
+            let currentRecords = try await queryCurrentRecords(in: zoneID, database: database)
+            var recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, $0) })
+            for record in currentRecords { recordsByID[record.recordID] = record }
+            records = Array(recordsByID.values)
+        }
         return (records, deletedItemIDs)
+    }
+
+    private func queryCurrentRecords(in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> [CKRecord] {
+        let requiredTypes = ["Collection", "CollectionItem", "CollectionEvent"]
+        let optionalTypes = ["CollectionItemRating", "CollectionItemComment"]
+        var records: [CKRecord] = []
+
+        for recordType in requiredTypes + optionalTypes {
+            do {
+                records.append(contentsOf: try await queryRecords(ofType: recordType, in: zoneID, database: database))
+            } catch let error as CKError where optionalTypes.contains(recordType) && (error.code == .unknownItem || error.code == .invalidArguments || error.code == .serverRejectedRequest) {
+                // Older deployed schemas may not contain optional collaboration
+                // types yet. Their absence must not hide the collection itself.
+            }
+        }
+        return records
+    }
+
+    private func queryRecords(ofType recordType: String, in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> [CKRecord] {
+        let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
+        var records: [CKRecord] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let page: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                page = try await database.records(continuingMatchFrom: cursor, desiredKeys: nil, resultsLimit: 400)
+            } else {
+                page = try await database.records(matching: query, inZoneWith: zoneID, desiredKeys: nil, resultsLimit: 400)
+            }
+            records.append(contentsOf: page.matchResults.compactMap { try? $0.1.get() })
+            cursor = page.queryCursor
+        } while cursor != nil
+
+        return records
     }
 
     private func settingsJSON(for collection: CollectionModel) -> String { let payload = CollectionSettingsPayload(category: collection.category, statuses: collection.statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields); return (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}" }
