@@ -9,7 +9,9 @@ enum WebSyncScheduler {
                 let context = ModelContext(container); let configs = (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.enabled }))) ?? []; var success = true
                 for config in configs {
                     let result = await HTMLSyncCoordinator(context: context).sync(config)
-                    LocalNotificationService.shared.scheduleAutomaticSyncNotifications(collectionName: result.collectionName, addedItems: result.addedItems, matchedStateChanges: result.matchedStateChanges)
+                    if let collectionID = result.collectionID {
+                        LocalNotificationService.shared.scheduleAutomaticSyncNotifications(collectionID: collectionID, collectionName: result.collectionName, addedItems: result.addedItems, matchedStateChanges: result.matchedStateChanges)
+                    }
                     if result.error != nil { success = false }
                 }
                 task.setTaskCompleted(success: success); schedule()

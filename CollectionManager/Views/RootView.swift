@@ -11,7 +11,7 @@ struct RootView: View {
             List(selection: $selectedCollectionID) {
                 Section("Your collections") { ForEach(store.collections) { collection in CollectionRow(collection: collection).tag(collection.id).swipeActions(edge: .trailing, allowsFullSwipe: false) { if collection.role.canDelete { Button(role: .destructive) { collectionPendingDeletion = collection } label: { Label("Delete", systemImage: "trash") } } } } }
                 Section { Button { showingSettings = true } label: { Label("Settings", systemImage: "gearshape") } }
-            }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showingNewCollection = true } label: { Image(systemName: "plus") } } }
+            }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showingNewCollection = true } label: { Image(systemName: "plus") } } }
         } detail: { if store.selectedCollection != nil { CollectionDetailView() } else { ContentUnavailableView("No collections yet", systemImage: "square.stack.3d.up", description: Text("Create your first collection to get started.")) } }
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
         .sheet(isPresented: $showingSettings) { SettingsView() }

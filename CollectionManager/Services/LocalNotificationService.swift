@@ -1,11 +1,43 @@
 import Foundation
 import UserNotifications
 
+enum LocalNotificationPreference: String, CaseIterable, Sendable {
+    case sharedItemAdded
+    case sharedItemRemoved
+    case automaticSyncItemAdded
+    case automaticSyncStatusChanged
+}
+
 enum LocalNotificationPreferences {
-    static let sharedItemAdded = "notifications.sharedItemAdded"
-    static let sharedItemRemoved = "notifications.sharedItemRemoved"
-    static let automaticSyncItemAdded = "notifications.automaticSyncItemAdded"
-    static let automaticSyncStatusChanged = "notifications.automaticSyncStatusChanged"
+    private static let keyPrefix = "notifications.collection."
+
+    static func key(_ preference: LocalNotificationPreference, collectionID: UUID) -> String {
+        "\(keyPrefix)\(collectionID.uuidString).\(preference.rawValue)"
+    }
+
+    static func isEnabled(_ preference: LocalNotificationPreference, collectionID: UUID) -> Bool {
+        UserDefaults.standard.bool(forKey: key(preference, collectionID: collectionID))
+    }
+
+    static func migrateLegacySettings(to collectionIDs: [UUID]) {
+        let defaults = UserDefaults.standard
+        let legacyKeys: [(LocalNotificationPreference, String)] = [
+            (.sharedItemAdded, "notifications.sharedItemAdded"),
+            (.sharedItemRemoved, "notifications.sharedItemRemoved"),
+            (.automaticSyncItemAdded, "notifications.automaticSyncItemAdded"),
+            (.automaticSyncStatusChanged, "notifications.automaticSyncStatusChanged")
+        ]
+        guard legacyKeys.contains(where: { defaults.object(forKey: $0.1) != nil }) else { return }
+
+        for collectionID in collectionIDs {
+            for (preference, legacyKey) in legacyKeys where defaults.object(forKey: key(preference, collectionID: collectionID)) == nil {
+                if defaults.object(forKey: legacyKey) != nil {
+                    defaults.set(defaults.bool(forKey: legacyKey), forKey: key(preference, collectionID: collectionID))
+                }
+            }
+        }
+        legacyKeys.forEach { defaults.removeObject(forKey: $0.1) }
+    }
 }
 
 struct AutomaticSyncStateChange: Sendable {
@@ -49,15 +81,14 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
     }
 
     func scheduleSharedChanges(_ changes: CloudMergeNotificationChanges) {
-        let defaults = UserDefaults.standard
         for change in changes.sharedItemChanges {
             switch change.kind {
-            case .added where defaults.bool(forKey: LocalNotificationPreferences.sharedItemAdded):
+            case .added where LocalNotificationPreferences.isEnabled(.sharedItemAdded, collectionID: change.collectionID):
                 schedule(
                     title: "Item added",
                     body: "\(change.itemTitle) was added to \(change.collectionName) by another user."
                 )
-            case .removed where defaults.bool(forKey: LocalNotificationPreferences.sharedItemRemoved):
+            case .removed where LocalNotificationPreferences.isEnabled(.sharedItemRemoved, collectionID: change.collectionID):
                 schedule(
                     title: "Item removed",
                     body: "\(change.itemTitle) was removed from \(change.collectionName) by another user."
@@ -69,17 +100,17 @@ final class LocalNotificationService: NSObject, UNUserNotificationCenterDelegate
     }
 
     func scheduleAutomaticSyncNotifications(
+        collectionID: UUID,
         collectionName: String,
         addedItems: [String],
         matchedStateChanges: [AutomaticSyncStateChange]
     ) {
-        let defaults = UserDefaults.standard
-        if defaults.bool(forKey: LocalNotificationPreferences.automaticSyncItemAdded) {
+        if LocalNotificationPreferences.isEnabled(.automaticSyncItemAdded, collectionID: collectionID) {
             for title in addedItems {
                 schedule(title: "Item added by automatic sync", body: "\(title) was added to \(collectionName).")
             }
         }
-        if defaults.bool(forKey: LocalNotificationPreferences.automaticSyncStatusChanged) {
+        if LocalNotificationPreferences.isEnabled(.automaticSyncStatusChanged, collectionID: collectionID) {
             for change in matchedStateChanges {
                 schedule(
                     title: "Item status changed by automatic sync",

@@ -33,6 +33,7 @@ import SwiftData
         guard let repository else { return }
         isLoading = true
         collections = repository.collections()
+        LocalNotificationPreferences.migrateLegacySettings(to: collections.map(\.id))
         selectedCollection = selectedCollection.flatMap { selected in collections.first(where: { $0.id == selected.id }) } ?? collections.first
         if case .metadata(let fieldID, _) = itemSort,
            selectedCollection?.metadataFields.contains(where: { $0.id == fieldID }) != true {
@@ -83,7 +84,13 @@ import SwiftData
             await loadSelectedCollectionInBackground()
         }
     }
-    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil) { guard let collectionID = selectedCollection?.id else { return }; let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier); repository?.addItem(item); items.insert(item, at: 0) }
+    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil) {
+        guard let collectionID = selectedCollection?.id else { return }
+        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier)
+        repository?.addItem(item)
+        items.insert(item, at: 0)
+        Task { await syncCollections() }
+    }
     @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int {
         guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
         guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return 0 }
@@ -140,9 +147,16 @@ import SwiftData
         let mutationIDs = Set(mutations.map(\.id))
         do {
             let snapshots = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
+            // Remove the mutations that were just pushed before merging. The
+            // merge may enqueue recovery mutations for data previously routed
+            // to a participant's private duplicate, and those must survive for
+            // the next shared-zone sync.
+            repository.removeMutations(withIDs: mutationIDs)
             let notificationChanges = repository.merge(snapshots)
             LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
-            repository.removeMutations(withIDs: mutationIDs)
+            if !repository.pendingMutations().isEmpty {
+                syncRequestedWhileSyncing = true
+            }
             repository.setSyncState(collectionID: selectedCollection?.id ?? localCollections.first?.id ?? UUID(), state: .idle, lastSyncedAt: .now)
             syncState = .idle; pendingSyncCount = 0; loadCollections(); await loadSelectedCollectionInBackground()
         } catch {

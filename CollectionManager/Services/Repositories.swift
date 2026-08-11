@@ -450,6 +450,19 @@ actor CollectionBackgroundRepository {
     @discardableResult
     func merge(_ snapshots: [CloudCollectionSnapshot]) -> CloudMergeNotificationChanges {
         var notificationChanges = CloudMergeNotificationChanges()
+        var sharedSnapshotsByCollection: [UUID: CloudCollectionSnapshot] = [:]
+        for snapshot in snapshots where snapshot.collection.role != .owner {
+            sharedSnapshotsByCollection[snapshot.collection.id] = snapshot
+        }
+        var privateItemsToRecover: [UUID: UUID] = [:]
+        for snapshot in snapshots where snapshot.collection.role == .owner {
+            guard let sharedSnapshot = sharedSnapshotsByCollection[snapshot.collection.id] else { continue }
+            let sharedItems = Dictionary(uniqueKeysWithValues: sharedSnapshot.items.map { ($0.id, $0) })
+            for item in snapshot.items {
+                if let sharedItem = sharedItems[item.id], item.updatedAt <= sharedItem.updatedAt { continue }
+                privateItemsToRecover[item.id] = snapshot.collection.id
+            }
+        }
         for snapshot in snapshots {
             let collectionID = snapshot.collection.id
             let existingCollection = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first
@@ -461,7 +474,20 @@ actor CollectionBackgroundRepository {
             } else {
                 let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
                 let settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}"
-                context.insert(CollectionRecord(id: collectionID, name: snapshot.collection.name, icon: snapshot.collection.icon, subtitle: snapshot.collection.subtitle, settingsJSON: settingsJSON)); context.insert(CollectionMemberRecord(collectionID: collectionID, participantID: "cloud", role: snapshot.collection.role))
+                context.insert(CollectionRecord(id: collectionID, name: snapshot.collection.name, icon: snapshot.collection.icon, subtitle: snapshot.collection.subtitle, settingsJSON: settingsJSON))
+            }
+            let memberships = (try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+            if memberships.isEmpty {
+                context.insert(CollectionMemberRecord(collectionID: collectionID, participantID: "cloud", role: snapshot.collection.role))
+            } else {
+                // A failed early share could leave an editor with a private
+                // duplicate and an owner membership. Private snapshots are
+                // merged first and shared snapshots last, so update every
+                // membership here to make the shared role authoritative.
+                for membership in memberships {
+                    membership.role = snapshot.collection.role
+                    membership.updatedAt = .now
+                }
             }
             let existingItems = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             var itemsByID = Dictionary(uniqueKeysWithValues: existingItems.map { ($0.id, $0) })
@@ -513,6 +539,15 @@ actor CollectionBackgroundRepository {
                 record.id = event.id; record.timestamp = event.timestamp
                 context.insert(record)
             }
+        }
+        let existingPendingItemSaves = Set(pendingMutations()
+            .filter { $0.recordType == "CollectionItem" && $0.operation != "delete" }
+            .map(\.recordName))
+        for (itemID, collectionID) in privateItemsToRecover where !existingPendingItemSaves.contains(itemID.uuidString) {
+            // Preserve items/edits that the old routing bug successfully saved
+            // only to the participant's private duplicate. The next sync now
+            // sees an editor role and sends these mutations to the shared zone.
+            enqueue(collectionID: collectionID, itemID: itemID, recordName: itemID.uuidString, recordType: "CollectionItem")
         }
         save()
         return notificationChanges

@@ -62,6 +62,7 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
 
 @main struct CollectionManagerApp: App {
     @UIApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     let container: ModelContainer
     @State private var store = AppStore()
     init() {
@@ -93,7 +94,8 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
         WindowGroup {
             RootView()
                 .environment(store)
-                .task {
+                .task(id: scenePhase) {
+                    guard scenePhase == .active else { return }
                     store.configure(context: container.mainContext, container: container)
                     CloudShareInvitationInbox.shared.install { metadata in
                         await store.acceptShare(metadata: metadata)
@@ -105,9 +107,16 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
                     // CloudKit entitlement (for example an unsigned simulator build).
                     await Task.yield()
                     await store.loadSelectedCollectionInBackground()
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    guard !Task.isCancelled else { return }
                     await store.syncCollections()
+
+                    // CloudKit collaboration changes can arrive while the app
+                    // remains open. Refresh periodically while active so edits
+                    // from other participants appear without a relaunch.
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(30))
+                        guard !Task.isCancelled else { return }
+                        await store.syncCollections()
+                    }
                 }
                 .onOpenURL { url in Task { await store.acceptShare(from: url) } }
         }

@@ -1,15 +1,9 @@
 import SwiftUI
-import UserNotifications
 
 struct SettingsView: View {
     @AppStorage("global.defaultCollectionIcon") private var defaultIcon = "square.stack.3d.up.fill"
     @AppStorage("global.confirmDeletes") private var confirmDeletes = true
-    @AppStorage(LocalNotificationPreferences.sharedItemAdded) private var notifySharedItemAdded = false
-    @AppStorage(LocalNotificationPreferences.sharedItemRemoved) private var notifySharedItemRemoved = false
-    @AppStorage(LocalNotificationPreferences.automaticSyncItemAdded) private var notifyAutomaticSyncItemAdded = false
-    @AppStorage(LocalNotificationPreferences.automaticSyncStatusChanged) private var notifyAutomaticSyncStatusChanged = false
     @State private var gamesEANAPIKey = ""
-    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         NavigationStack {
@@ -17,26 +11,6 @@ struct SettingsView: View {
                 Section("Defaults") {
                     TextField("Default collection icon", text: $defaultIcon)
                     Toggle("Confirm before deleting", isOn: $confirmDeletes)
-                }
-
-                Section("Notifications") {
-                    Toggle("Another user added an item", isOn: $notifySharedItemAdded)
-                        .onChange(of: notifySharedItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Another user removed an item", isOn: $notifySharedItemRemoved)
-                        .onChange(of: notifySharedItemRemoved) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Automatic sync added an item", isOn: $notifyAutomaticSyncItemAdded)
-                        .onChange(of: notifyAutomaticSyncItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Automatic sync changed a matched item's status", isOn: $notifyAutomaticSyncStatusChanged)
-                        .onChange(of: notifyAutomaticSyncStatusChanged) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    if notificationStatus == .denied {
-                        Text("Notifications are disabled for Collection Manager. Enable them in Settings.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("These preferences are stored only on this device and are never included in iCloud sync.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Section("Games EAN lookup") {
@@ -57,7 +31,6 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .task {
                 gamesEANAPIKey = GamesEANAPIKeyStore.load()
-                notificationStatus = await LocalNotificationService.shared.authorizationStatus()
             }
         }
     }
@@ -69,6 +42,10 @@ struct CollectionSettingsView: View {
     @State private var metadataFields: [MetadataFieldDefinition]
     @State private var defaultState: ItemState
     @State private var barcodeRequired = false
+    @AppStorage private var notifySharedItemAdded: Bool
+    @AppStorage private var notifySharedItemRemoved: Bool
+    @AppStorage private var notifyAutomaticSyncItemAdded: Bool
+    @AppStorage private var notifyAutomaticSyncStatusChanged: Bool
 
     init(collection: CollectionModel) {
         self.collection = collection
@@ -76,6 +53,10 @@ struct CollectionSettingsView: View {
         _statuses = State(initialValue: configured)
         _metadataFields = State(initialValue: collection.metadataFields)
         _defaultState = State(initialValue: configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
+        _notifySharedItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemAdded, collectionID: collection.id))
+        _notifySharedItemRemoved = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemRemoved, collectionID: collection.id))
+        _notifyAutomaticSyncItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.automaticSyncItemAdded, collectionID: collection.id))
+        _notifyAutomaticSyncStatusChanged = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.automaticSyncStatusChanged, collectionID: collection.id))
     }
 
     var body: some View {
@@ -146,6 +127,21 @@ struct CollectionSettingsView: View {
                         }
                     }
                     Toggle("Require barcode", isOn: $barcodeRequired)
+                }
+
+                Section {
+                    Toggle("Another user added an item", isOn: $notifySharedItemAdded)
+                        .onChange(of: notifySharedItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Another user removed an item", isOn: $notifySharedItemRemoved)
+                        .onChange(of: notifySharedItemRemoved) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Automatic sync added an item", isOn: $notifyAutomaticSyncItemAdded)
+                        .onChange(of: notifyAutomaticSyncItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                    Toggle("Automatic sync changed a matched item's status", isOn: $notifyAutomaticSyncStatusChanged)
+                        .onChange(of: notifyAutomaticSyncStatusChanged) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("These preferences are stored only on this device and are never included in iCloud sync.")
                 }
             }
             .navigationTitle("Collection settings")

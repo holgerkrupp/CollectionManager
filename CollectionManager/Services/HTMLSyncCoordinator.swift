@@ -12,6 +12,7 @@ struct WebSyncResult: Sendable {
     var added = 0
     var updated = 0
     var error: String?
+    var collectionID: UUID? = nil
     var collectionName = "Collection"
     var addedItems: [String] = []
     var matchedStateChanges: [AutomaticSyncStateChange] = []
@@ -52,7 +53,7 @@ struct WebSyncResult: Sendable {
                 entries.append((effectiveDraft, key, configuration.updateExistingStates))
             }
             let counts = repository.applyWebDrafts(entries, collectionID: configuration.collectionID)
-            let result = WebSyncResult(added: counts.added, updated: counts.updated, collectionName: repository.collectionName(for: configuration.collectionID), addedItems: counts.addedItems, matchedStateChanges: counts.matchedStateChanges)
+            let result = WebSyncResult(added: counts.added, updated: counts.updated, collectionID: configuration.collectionID, collectionName: repository.collectionName(for: configuration.collectionID), addedItems: counts.addedItems, matchedStateChanges: counts.matchedStateChanges)
             repository.setWebSync(configuration, lastSyncAt: .now, error: nil)
             return result
         } catch { repository.setWebSync(configuration, lastSyncAt: configuration.lastSyncAt, error: error.localizedDescription); return WebSyncResult(error: error.localizedDescription) }
