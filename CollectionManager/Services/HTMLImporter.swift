@@ -35,7 +35,7 @@ struct HTMLImporter {
         )
     }
 
-    func prepareImport(from table: HTMLImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition]) -> ImportPreparation {
+    func prepareImport(from table: HTMLImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition], conditionalRules: [ConditionalMappingRule] = [], validStatusIDs: Set<String>? = nil) -> ImportPreparation {
         let sourceIndex = table.headers.firstIndex {
             $0.localizedCaseInsensitiveContains("url") ||
             $0.localizedCaseInsensitiveContains("source") ||
@@ -45,7 +45,9 @@ struct HTMLImporter {
             from: CSVImportTable(headers: table.headers, rows: table.rows),
             mapping: mapping,
             existingMetadataFields: existingMetadataFields,
-            sourceIdentifierColumn: sourceIndex
+            sourceIdentifierColumn: sourceIndex,
+            conditionalRules: conditionalRules,
+            validStatusIDs: validStatusIDs
         )
     }
 

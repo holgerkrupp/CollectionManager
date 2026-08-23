@@ -53,7 +53,7 @@ import SwiftData
         isLoading = true
         let loadedItems = await backgroundRepository.items(in: collectionID)
         guard selectedCollection?.id == collectionID else { return }
-        items = loadedItems
+        if items != loadedItems { items = loadedItems }
         webSyncs = repository.webSyncs(for: collectionID)
         isLoading = false
     }
@@ -84,10 +84,10 @@ import SwiftData
             await loadSelectedCollectionInBackground()
         }
     }
-    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil) {
+    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil) {
         guard let collectionID = selectedCollection?.id else { return }
-        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier)
-        repository?.addItem(item)
+        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
+        guard repository?.addItem(item) == true else { return }
         items.insert(item, at: 0)
         Task { await syncCollections() }
     }
@@ -99,7 +99,14 @@ import SwiftData
         return changed
     }
     func importDrafts(_ drafts: [ImportDraft]) { guard let repository, let collectionID = selectedCollection?.id else { return }; let entries = drafts.map { draft in (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)") }; repository.importDrafts(entries, collectionID: collectionID); loadSelectedCollection() }
-    func deduplicateImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deduplicateItems(in: collectionID); loadSelectedCollection(); return removed }
+    func deduplicateItems() -> Int {
+        guard let repository, let collectionID = selectedCollection?.id else { return 0 }
+        let removed = repository.deduplicateItems(in: collectionID)
+        loadSelectedCollection()
+        if removed > 0 { Task { await syncCollections() } }
+        return removed
+    }
+    func deduplicateImportedItems() -> Int { deduplicateItems() }
     func deleteAllImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed }
     func applyTagRules(_ options: TagGenerationOptions) -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed }
     func applyMergedTagsToExistingItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed }
@@ -128,10 +135,15 @@ import SwiftData
         isBulkOperationInProgress = false
         return removed
     }
-    func saveWebSync(_ sync: WebSyncRecord) { repository?.addWebSync(sync); UserDefaults.standard.set(Double(sync.intervalMinutes), forKey: "websync.minimumIntervalMinutes"); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; WebSyncScheduler.schedule() }
-    func updateWebSync(_ sync: WebSyncRecord) { repository?.updateWebSync(sync); UserDefaults.standard.set(Double(sync.intervalMinutes), forKey: "websync.minimumIntervalMinutes"); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; WebSyncScheduler.schedule() }
-    func deleteWebSync(_ sync: WebSyncRecord) { repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; WebSyncScheduler.schedule() }
-    func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? "Sync complete: \(result.added) added, \(result.updated) updated"; await loadSelectedCollectionInBackground() }
+    func saveWebSync(_ sync: WebSyncRecord) { repository?.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
+    func updateWebSync(_ sync: WebSyncRecord) { repository?.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
+    func deleteWebSync(_ sync: WebSyncRecord) { repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
+    func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? "Sync complete: \(result.added) added, \(result.updated) updated"; scheduleWebSync(); await loadSelectedCollectionInBackground() }
+
+    private func scheduleWebSync() {
+        guard let modelContext else { return }
+        WebSyncScheduler.schedule(context: modelContext)
+    }
     func syncCollections() async {
         guard let repository, let backgroundRepository else { return }
         guard CloudKitSharingService.isAvailable else { return }

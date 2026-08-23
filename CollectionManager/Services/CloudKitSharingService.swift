@@ -34,6 +34,12 @@ struct CloudCollectionSnapshot: Sendable {
     let events: [ItemEvent]
     let ratings: [ItemRating]
     let comments: [ItemComment]
+    let sharedWith: [CloudCollectionParticipant]?
+}
+
+struct CloudCollectionParticipant: Sendable {
+    let id: String
+    let displayName: String
 }
 
 struct CloudSyncMutation: Sendable {
@@ -48,6 +54,7 @@ struct CloudSyncMutation: Sendable {
 final class CloudKitSharingService {
     static let containerIdentifier = "iCloud.de.holgerkrupp.CollectionManager"
     private static let bootstrapKey = "cloudSync.didBootstrapLocalData"
+    private static let imageBootstrapKey = "cloudSync.didUploadImagesV1"
     private var injectedContainer: CKContainer?
     private lazy var container: CKContainer = injectedContainer ?? CKContainer(identifier: Self.containerIdentifier)
 
@@ -73,7 +80,7 @@ final class CloudKitSharingService {
             _ = try await database.save(CKRecordZone(zoneID: zoneID))
         }
         let rootID = CKRecord.ID(recordName: collection.id.uuidString, zoneID: zoneID)
-        let collectionItems = items.filter { $0.collectionID == collection.id }
+        let collectionItems = await preparedItemsForCloud(items.filter { $0.collectionID == collection.id })
         let itemRecords = collectionItems.map { record(for: $0, zoneID: zoneID, parent: rootID) }
         let eventRecords = events.map { record(for: $0, zoneID: zoneID, parent: rootID) }
         let ratingRecords = collectionItems.flatMap { $0.ratings.map { record(for: $0, zoneID: zoneID, parent: CKRecord.ID(recordName: $0.itemID.uuidString, zoneID: zoneID)) } }
@@ -154,11 +161,20 @@ final class CloudKitSharingService {
 
     func sync(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws -> [CloudCollectionSnapshot] {
         guard Self.isAvailable else { throw SharingError.unavailable }
-        try await push(collections: collections, items: items, events: events, mutations: mutations)
+        let needsImageBootstrap = !UserDefaults.standard.bool(forKey: Self.imageBootstrapKey)
+        var cloudItems = await preparedItemsForCloud(items)
+        if needsImageBootstrap {
+            let migrationDate = Date.now
+            for index in cloudItems.indices where cloudItems[index].imageData != nil {
+                cloudItems[index].updatedAt = migrationDate
+            }
+        }
+        try await push(collections: collections, items: cloudItems, events: events, mutations: mutations)
         async let privateSnapshots = fetchSnapshots(from: container.privateCloudDatabase)
         async let sharedSnapshots = fetchSnapshots(from: container.sharedCloudDatabase)
         let snapshots = try await privateSnapshots + sharedSnapshots
         UserDefaults.standard.set(true, forKey: Self.bootstrapKey)
+        UserDefaults.standard.set(true, forKey: Self.imageBootstrapKey)
         return snapshots
     }
 
@@ -217,7 +233,8 @@ final class CloudKitSharingService {
         // one-time bootstrap for data created by older app versions that had no
         // outbox records yet.
         let needsBootstrap = !UserDefaults.standard.bool(forKey: Self.bootstrapKey)
-        guard needsBootstrap || !mutations.isEmpty else { return }
+        let needsImageBootstrap = !UserDefaults.standard.bool(forKey: Self.imageBootstrapKey)
+        guard needsBootstrap || needsImageBootstrap || !mutations.isEmpty else { return }
         let sharedZones = (try? await container.sharedCloudDatabase.allRecordZones()) ?? []
         let sharedZonesByName = Dictionary(uniqueKeysWithValues: sharedZones.map { ($0.zoneID.zoneName, $0.zoneID) })
         let localCollectionIDs = Set(collections.map(\.id))
@@ -236,6 +253,7 @@ final class CloudKitSharingService {
             let ratingMutations = mutations.filter { $0.collectionID == collection.id && $0.recordType == "CollectionItemRating" }
             let commentMutations = mutations.filter { $0.collectionID == collection.id && $0.recordType == "CollectionItemComment" }
             let deleteMutations = mutations.filter { $0.collectionID == collection.id && $0.operation == "delete" }
+            let hasImagesToBootstrap = needsImageBootstrap && items.contains { $0.collectionID == collection.id && $0.imageData != nil }
             let isOwner = collection.role == .owner
             let database: CKDatabase
             let zone: CKRecordZone.ID
@@ -249,7 +267,7 @@ final class CloudKitSharingService {
             }
             let shouldSaveCollection = isOwner && (needsBootstrap || collectionMutations.contains { $0.operation != "delete" })
             let shouldBootstrap = isOwner && needsBootstrap
-            guard shouldSaveCollection || !itemMutations.isEmpty || !ratingMutations.isEmpty || !commentMutations.isEmpty || !deleteMutations.isEmpty else { continue }
+            guard shouldSaveCollection || hasImagesToBootstrap || !itemMutations.isEmpty || !ratingMutations.isEmpty || !commentMutations.isEmpty || !deleteMutations.isEmpty else { continue }
             if isOwner { do { _ = try await database.save(CKRecordZone(zoneID: zone)) } catch let error as CKError where error.code == .serverRejectedRequest { } }
             let rootID = CKRecord.ID(recordName: collection.id.uuidString, zoneID: zone)
             var saving: [CKRecord] = []
@@ -271,7 +289,7 @@ final class CloudKitSharingService {
             // and save only item records that actually changed.
             let collectionItems = shouldBootstrap
                 ? items.filter { $0.collectionID == collection.id }
-                : items.filter { itemIDs.contains($0.id) }
+                : items.filter { itemIDs.contains($0.id) || (hasImagesToBootstrap && $0.collectionID == collection.id && $0.imageData != nil) }
             saving.append(contentsOf: collectionItems.map { record(for: $0, zoneID: zone, parent: rootID) })
             let eventItemIDs = Set(collectionItems.map(\.id))
             saving.append(contentsOf: events.filter { eventItemIDs.contains($0.itemID) }.map { record(for: $0, zoneID: zone, parent: rootID) })
@@ -297,6 +315,7 @@ final class CloudKitSharingService {
     }
 
     private func saveRecordsResiliently(_ records: [CKRecord], in database: CKDatabase) async throws {
+        defer { removeTemporaryAssets(from: records) }
         do {
             try await modifyRecords(in: database, saving: records, atomically: false)
         } catch {
@@ -398,10 +417,28 @@ final class CloudKitSharingService {
                 let ratings = zoneRecords.filter { $0.recordType == "CollectionItemRating" }.compactMap(rating(from:))
                 let comments = zoneRecords.filter { $0.recordType == "CollectionItemComment" }.compactMap(comment(from:))
                 let settings = decodeSettings(root["settingsJSON"] as? String)
-                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, role: database.databaseScope == .shared ? .editor : .owner), items: items, deletedItemIDs: deletedItemIDs, events: events, ratings: ratings, comments: comments))
+                let sharedWith = await sharedParticipants(for: root, in: database)
+                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, role: database.databaseScope == .shared ? .editor : .owner), items: items, deletedItemIDs: deletedItemIDs, events: events, ratings: ratings, comments: comments, sharedWith: sharedWith))
             }
         }
         return snapshots
+    }
+
+    private func sharedParticipants(for root: CKRecord, in database: CKDatabase) async -> [CloudCollectionParticipant]? {
+        guard let shareID = root.share?.recordID else { return [] }
+        guard let share = try? await database.record(for: shareID) as? CKShare else { return nil }
+        let currentUserID = share.currentUserParticipant?.userIdentity.userRecordID?.recordName
+        let formatter = PersonNameComponentsFormatter()
+        return share.participants.compactMap { participant in
+            let identity = participant.userIdentity
+            let participantID = identity.userRecordID?.recordName
+            if let currentUser = share.currentUserParticipant, participant === currentUser { return nil }
+            if let participantID, let currentUserID, participantID == currentUserID { return nil }
+            guard participant.acceptanceStatus != .removed, let components = identity.nameComponents else { return nil }
+            let name = formatter.string(from: components).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return CloudCollectionParticipant(id: participantID ?? name, displayName: name)
+        }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
     private func records(in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> ([CKRecord], [UUID]) {
@@ -483,7 +520,7 @@ final class CloudKitSharingService {
     private func zoneID(for collectionID: UUID) -> CKRecordZone.ID { CKRecordZone.ID(zoneName: "collection-\(collectionID.uuidString)", ownerName: CKCurrentUserDefaultName) }
     private func record(for item: CollectionItem, zoneID: CKRecordZone.ID, parent: CKRecord.ID) -> CKRecord {
         let record = CKRecord(recordType: "CollectionItem", recordID: CKRecord.ID(recordName: item.id.uuidString, zoneID: zoneID))
-        record["collectionID"] = item.collectionID.uuidString as CKRecordValue; record["title"] = item.title as CKRecordValue; record["brand"] = item.brand as CKRecordValue; record["variant"] = item.variant as CKRecordValue; record["itemDescription"] = item.itemDescription as CKRecordValue; record["state"] = item.state.rawValue as CKRecordValue; record["quantity"] = item.quantity as CKRecordValue; record["createdAt"] = item.createdAt as CKRecordValue; record["updatedAt"] = item.updatedAt as CKRecordValue; if let consumedAt = item.consumedAt { record["consumedAt"] = consumedAt as CKRecordValue }; if let tags = try? String(data: JSONEncoder().encode(item.tags), encoding: .utf8) { record["tagsJSON"] = tags as CKRecordValue }; if let metadata = try? String(data: JSONEncoder().encode(item.metadata), encoding: .utf8) { record["metadataJSON"] = metadata as CKRecordValue }; if let barcode = item.barcode { record["barcodeValue"] = barcode.value as CKRecordValue; record["barcodeType"] = barcode.type as CKRecordValue }; record.parent = CKRecord.Reference(recordID: parent, action: .none); return record
+        record["collectionID"] = item.collectionID.uuidString as CKRecordValue; record["title"] = item.title as CKRecordValue; record["brand"] = item.brand as CKRecordValue; record["variant"] = item.variant as CKRecordValue; record["itemDescription"] = item.itemDescription as CKRecordValue; record["state"] = item.state.rawValue as CKRecordValue; record["quantity"] = item.quantity as CKRecordValue; record["createdAt"] = item.createdAt as CKRecordValue; record["updatedAt"] = item.updatedAt as CKRecordValue; if let consumedAt = item.consumedAt { record["consumedAt"] = consumedAt as CKRecordValue }; if let tags = try? String(data: JSONEncoder().encode(item.tags), encoding: .utf8) { record["tagsJSON"] = tags as CKRecordValue }; if let metadata = try? String(data: JSONEncoder().encode(item.metadata), encoding: .utf8) { record["metadataJSON"] = metadata as CKRecordValue }; if let snapshot = item.sourceSnapshot, let snapshotJSON = try? String(data: JSONEncoder().encode(snapshot), encoding: .utf8) { record["sourceSnapshotJSON"] = snapshotJSON as CKRecordValue }; if let barcode = item.barcode { record["barcodeValue"] = barcode.value as CKRecordValue; record["barcodeType"] = barcode.type as CKRecordValue }; if let imageData = item.imageData, let asset = temporaryAsset(for: imageData, itemID: item.id) { record["imageAsset"] = asset }; record.parent = CKRecord.Reference(recordID: parent, action: .none); return record
     }
     private func record(for event: ItemEvent, zoneID: CKRecordZone.ID, parent: CKRecord.ID) -> CKRecord {
         let record = CKRecord(recordType: "CollectionEvent", recordID: CKRecord.ID(recordName: event.id.uuidString, zoneID: zoneID))
@@ -530,7 +567,28 @@ final class CloudKitSharingService {
         guard let id = UUID(uuidString: record["id"] as? String ?? record.recordID.recordName), let itemID = UUID(uuidString: record["itemID"] as? String ?? ""), let participantID = record["participantID"] as? String, let text = record["text"] as? String else { return nil }
         return ItemComment(id: id, itemID: itemID, participantID: participantID, participantName: record["participantName"] as? String ?? "Collaborator", text: text, createdAt: record["createdAt"] as? Date ?? .now, updatedAt: record["updatedAt"] as? Date ?? .now)
     }
-    private func item(from record: CKRecord, collectionID: UUID) -> CollectionItem? { guard let id = UUID(uuidString: record.recordID.recordName), let title = record["title"] as? String else { return nil }; return CollectionItem(id: id, collectionID: collectionID, title: title, brand: record["brand"] as? String ?? "", variant: record["variant"] as? String ?? "", itemDescription: record["itemDescription"] as? String ?? "", state: ItemState(rawValue: record["state"] as? String ?? "wanted"), quantity: record["quantity"] as? Int ?? 1, barcode: (record["barcodeValue"] as? String).flatMap { Barcode(rawValue: $0, type: record["barcodeType"] as? String ?? "EAN-13") }, createdAt: record["createdAt"] as? Date ?? .now, updatedAt: record["updatedAt"] as? Date ?? .now, consumedAt: record["consumedAt"] as? Date, tags: decode(record["tagsJSON"] as? String, fallback: []), metadata: decode(record["metadataJSON"] as? String, fallback: [:]), imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: nil) }
+    private func item(from record: CKRecord, collectionID: UUID) -> CollectionItem? { guard let id = UUID(uuidString: record.recordID.recordName), let title = record["title"] as? String else { return nil }; let imageData = (record["imageAsset"] as? CKAsset)?.fileURL.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }; let sourceSnapshot: ProductSourceSnapshot? = decode(record["sourceSnapshotJSON"] as? String, fallback: nil); return CollectionItem(id: id, collectionID: collectionID, title: title, brand: record["brand"] as? String ?? "", variant: record["variant"] as? String ?? "", itemDescription: record["itemDescription"] as? String ?? "", state: ItemState(rawValue: record["state"] as? String ?? "wanted"), quantity: record["quantity"] as? Int ?? 1, barcode: (record["barcodeValue"] as? String).flatMap { Barcode(rawValue: $0, type: record["barcodeType"] as? String ?? "EAN-13") }, createdAt: record["createdAt"] as? Date ?? .now, updatedAt: record["updatedAt"] as? Date ?? .now, consumedAt: record["consumedAt"] as? Date, tags: decode(record["tagsJSON"] as? String, fallback: []), metadata: decode(record["metadataJSON"] as? String, fallback: [:]), imageSystemName: record["imageSystemName"] as? String ?? "shippingbox.fill", imageData: imageData, importSourceKey: record["importSourceKey"] as? String, sourceSnapshot: sourceSnapshot) }
+    private func preparedItemsForCloud(_ items: [CollectionItem]) async -> [CollectionItem] {
+        var prepared = items
+        await withTaskGroup(of: (Int, Data).self) { group in
+            for (index, item) in items.enumerated() {
+                guard let imageData = item.imageData else { continue }
+                group.addTask { (index, await ImageProcessor.preparedData(imageData)) }
+            }
+            for await (index, imageData) in group { prepared[index].imageData = imageData }
+        }
+        return prepared
+    }
+    private func temporaryAsset(for data: Data, itemID: UUID) -> CKAsset? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("CollectionManager-\(itemID.uuidString)-\(UUID().uuidString).jpg")
+        do { try data.write(to: url, options: .atomic); return CKAsset(fileURL: url) } catch { return nil }
+    }
+    private func removeTemporaryAssets(from records: [CKRecord]) {
+        for record in records {
+            guard let url = (record["imageAsset"] as? CKAsset)?.fileURL else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
     private func decode<T: Decodable>(_ string: String?, fallback: T) -> T { guard let string, let data = string.data(using: .utf8), let value = try? JSONDecoder().decode(T.self, from: data) else { return fallback }; return value }
 }
 

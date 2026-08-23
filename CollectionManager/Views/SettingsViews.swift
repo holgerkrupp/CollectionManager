@@ -1,22 +1,29 @@
 import SwiftUI
+import SFSymbolSelector
 
 struct SettingsView: View {
+    @Environment(AppStore.self) private var store
     @AppStorage("global.defaultCollectionIcon") private var defaultIcon = "square.stack.3d.up.fill"
     @AppStorage("global.confirmDeletes") private var confirmDeletes = true
+    @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
     @State private var gamesEANAPIKey = ""
+    @State private var showingDeduplicationConfirmation = false
+    @State private var showingOnboarding = false
+    @State private var deduplicationMessage: String?
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Defaults") {
                     TextField("Default collection icon", text: $defaultIcon)
+                    SFSymbolSelector(selection: $defaultIcon, suggestedSymbolName: defaultIcon)
                     Toggle("Confirm before deleting", isOn: $confirmDeletes)
                 }
 
                 Section("Games EAN lookup") {
                     SecureField("API key", text: $gamesEANAPIKey)
                         .onChange(of: gamesEANAPIKey) { _, newValue in GamesEANAPIKeyStore.save(newValue) }
-                    Text("Used only for Games collections. Requests go to your Game Collector API at levelcomplete.de. The key is stored in Keychain.")
+                    Text("Uses your Games EAN API for video-game metadata. The configured key is stored in Keychain; the app also retains the built-in API configuration for this controlled service.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -27,10 +34,51 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                Section("Help") {
+                    Button {
+                        showingOnboarding = true
+                    } label: {
+                        Label("Show Onboarding", systemImage: "questionmark.circle")
+                    }
+                }
+
+                Section {
+                    Button("Remove duplicate items", role: .destructive) {
+                        showingDeduplicationConfirmation = true
+                    }
+                    .disabled(store.selectedCollection?.role.canEdit != true)
+                    if let deduplicationMessage {
+                        Text(deduplicationMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Collection maintenance")
+                } footer: {
+                    if let collection = store.selectedCollection {
+                        Text("Checks \(collection.name) for items with the same title, brand, and variant regardless of capitalization. The newest copy is kept.")
+                    } else {
+                        Text("Select a collection before removing duplicates.")
+                    }
+                }
             }
             .navigationTitle("Settings")
+            .fullScreenCover(isPresented: $showingOnboarding) {
+                OnboardingView {
+                    onboardingCompleted = true
+                    showingOnboarding = false
+                }
+            }
             .task {
                 gamesEANAPIKey = GamesEANAPIKeyStore.load()
+            }
+            .confirmationDialog("Remove duplicate items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
+                Button("Remove Duplicates", role: .destructive) {
+                    let removed = store.deduplicateItems()
+                    deduplicationMessage = removed == 0 ? "No duplicates found." : "Removed \(removed) duplicate item\(removed == 1 ? "" : "s")."
+                }
+                Button("Cancel", role: .cancel) {}
             }
         }
     }
@@ -216,6 +264,7 @@ struct StatusEditorView: View {
                 }
                 TextField("SF Symbol", text: $status.symbol)
                     .textInputAutocapitalization(.never)
+                SFSymbolSelector(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
             }
             Section("Preview") {
                 Label(status.name.isEmpty ? "Status" : status.name, systemImage: status.symbol.isEmpty ? "circle" : status.symbol)
@@ -230,11 +279,25 @@ struct EditCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let original: CollectionModel
     @State private var name: String; @State private var subtitle: String; @State private var icon: String; @State private var category: CollectionCategory
     init(collection: CollectionModel) { original = collection; _name = State(initialValue: collection.name); _subtitle = State(initialValue: collection.subtitle); _icon = State(initialValue: collection.icon); _category = State(initialValue: collection.category) }
-    var body: some View { NavigationStack { Form { TextField("Name", text: $name); Picker("Category", selection: $category) { ForEach(CollectionCategory.allCases) { Text($0.name).tag($0) } }; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); NavigationLink("Customize statuses and metadata") { CollectionSettingsView(collection: store.selectedCollection ?? original) } } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+    var body: some View { NavigationStack { Form { TextField("Name", text: $name); categoryPicker; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); NavigationLink("Customize statuses and metadata") { CollectionSettingsView(collection: store.selectedCollection ?? original) } } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+    @ViewBuilder private var categoryPicker: some View {
+        Picker("Category", selection: $category) {
+            ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in
+                Section(group) { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } }
+            }
+        }
+    }
 }
 
 struct NewCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
     @State private var name = ""; @State private var subtitle = "Private"; @State private var icon = "square.stack.3d.up.fill"; @State private var category: CollectionCategory = .custom
-    var body: some View { NavigationStack { Form { TextField("Collection name", text: $name); Picker("Category", selection: $category) { ForEach(CollectionCategory.allCases) { Text($0.name).tag($0) } }; TextField("Sharing", text: $subtitle); TextField("SF Symbol", text: $icon); Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary) }.navigationTitle("New collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { store.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); dismiss() }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty) } } } }
+    var body: some View { NavigationStack { Form { TextField("Collection name", text: $name); categoryPicker; TextField("Sharing", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary) }.navigationTitle("New collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { store.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); dismiss() }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty) } } } }
+    @ViewBuilder private var categoryPicker: some View {
+        Picker("Category", selection: $category) {
+            ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in
+                Section(group) { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } }
+            }
+        }
+    }
 }

@@ -111,23 +111,22 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
     var name: String {
-        switch self { case .food: "Food & Drinks"; case .games: "Video Games"; case .boardGames: "Board Games"; case .books: "Books"; case .music: "Music"; case .cosmetics: "Cosmetics"; case .petFood: "Pet Food"; case .products: "Other Products"; case .custom: "Custom" }
+        switch self { case .food: "Food & Drinks"; case .games: "Video Games"; case .boardGames: "Board Games, Puzzles & Toys"; case .books: "Books & Comics"; case .music: "Music & Audio"; case .cosmetics: "Beauty & Personal Care"; case .petFood: "Pet Food"; case .products: "Toys, LEGO & Other Products"; case .custom: "Custom" }
     }
-    // Games is intentionally ready for a future personal EAN API, but does not
-    // claim scanner/product-lookup support until that provider is configured.
     var supportsBarcodeScanning: Bool { self != .custom && barcodeProviderAvailable }
     var barcodeProviderAvailable: Bool {
         switch self {
-        case .food: true
-        case .games: !GamesEANAPIKeyStore.load().isEmpty
-        case .boardGames, .books, .music, .cosmetics, .petFood, .products: true
+        case .food, .games, .boardGames, .books, .music, .cosmetics, .petFood, .products: true
         case .custom: false
         }
+    }
+    var pickerGroup: String {
+        switch self { case .food, .cosmetics, .petFood: "Consumables & Care"; case .games, .boardGames: "Games & Play"; case .books, .music: "Books & Media"; case .products: "Toys, Collectibles & General Products"; case .custom: "Flexible" }
     }
     var detailFields: [(key: String, title: String, placeholder: String)] {
         switch self {
         case .food:
-            return [("country", "Country", "e.g. Germany"), ("categories", "Categories", "e.g. soda, energy drink")]
+            return [("country", "Country", "e.g. Germany"), ("categories", "Categories", "e.g. whisky, soda"), ("expression", "Expression", "e.g. Double Cask"), ("age", "Age", "e.g. 12 Year Old"), ("alcoholStrength", "Alcohol strength", "e.g. 40%"), ("packageSize", "Package size", "e.g. 700 ml")]
         case .games:
             return [("publisher", "Publisher", "e.g. Nintendo"), ("platform", "Platform", "e.g. Switch"), ("genre", "Genre", "e.g. strategy"), ("releaseYear", "Release year", "e.g. 2024"), ("players", "Players", "e.g. 2–4")]
         case .boardGames:
@@ -141,7 +140,7 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
         case .petFood:
             return [("categories", "Categories", "e.g. dog food"), ("country", "Country", "e.g. Germany")]
         case .products:
-            return [("categories", "Categories", "e.g. toy, household"), ("manufacturer", "Manufacturer", "e.g. Acme")]
+            return [("categories", "Categories", "e.g. LEGO, puzzle, household"), ("manufacturer", "Manufacturer", "e.g. Acme"), ("modelNumber", "Model / set number", "e.g. 10316")]
         case .custom:
             return []
         }
@@ -230,10 +229,15 @@ struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
 }
 
 struct CollectionModel: Identifiable, Hashable, Sendable {
-    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var role: CollectionMemberRole = .owner
+    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var role: CollectionMemberRole = .owner; var sharedWith: [String] = []
 
     func status(for state: ItemState) -> CollectionStatus {
         statuses.first(where: { $0.id == state.rawValue }) ?? CollectionStatus.fallback(for: state)
+    }
+
+    var caption: String {
+        guard !sharedWith.isEmpty else { return subtitle }
+        return "Shared with " + ListFormatter.localizedString(byJoining: sharedWith)
     }
 }
 
@@ -302,8 +306,81 @@ struct CollectionSettingsPayload: Codable, Sendable {
     }
 }
 
+struct ProductSourceSnapshot: Hashable, Codable, Sendable {
+    static let currentSchemaVersion = 1
+    static let maximumPayloadBytes = 128_000
+
+    let provider: String
+    let schemaVersion: Int
+    let barcode: String
+    let fetchedAt: Date
+    let payloadJSON: String
+    let mappedFields: [String: String]
+
+    init?(provider: String, barcode: String, fetchedAt: Date = .now, payloadData: Data, mappedFields: [String: String]) {
+        guard payloadData.count <= Self.maximumPayloadBytes, let payloadJSON = String(data: payloadData, encoding: .utf8) else { return nil }
+        self.provider = provider
+        schemaVersion = Self.currentSchemaVersion
+        self.barcode = barcode
+        self.fetchedAt = fetchedAt
+        self.payloadJSON = payloadJSON
+        self.mappedFields = mappedFields
+    }
+
+    var sourceFields: [ProductSourceField] {
+        var fields = mappedFields.map { key, value in
+            ProductSourceField(id: "mapped.\(key)", name: Self.displayName(key), path: "mapped.\(key)", value: value, source: "Mapped")
+        }
+        if let data = payloadJSON.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) {
+            Self.flatten(object, path: "raw", into: &fields)
+        }
+        return fields.filter { !$0.value.isEmpty }.sorted {
+            if $0.source != $1.source { return $0.source == "Mapped" }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private static func flatten(_ value: Any, path: String, into fields: inout [ProductSourceField]) {
+        if let dictionary = value as? [String: Any] {
+            for key in dictionary.keys.sorted() {
+                if let element = dictionary[key] { flatten(element, path: "\(path).\(key)", into: &fields) }
+            }
+        } else if let array = value as? [Any] {
+            let values = array.compactMap(scalarString)
+            if values.count == array.count, !values.isEmpty {
+                fields.append(ProductSourceField(id: path, name: path.replacingOccurrences(of: "raw.", with: ""), path: path, value: values.joined(separator: ", "), source: "Raw API"))
+            } else {
+                for (index, element) in array.enumerated() { flatten(element, path: "\(path)[\(index)]", into: &fields) }
+            }
+        } else if let string = scalarString(value) {
+            fields.append(ProductSourceField(id: path, name: path.replacingOccurrences(of: "raw.", with: ""), path: path, value: string, source: "Raw API"))
+        }
+    }
+
+    private static func scalarString(_ value: Any) -> String? {
+        if value is NSNull { return nil }
+        if let value = value as? String { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
+    }
+
+    private static func displayName(_ key: String) -> String {
+        key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+}
+
+struct ProductSourceField: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let path: String
+    let value: String
+    let source: String
+}
+
 struct CollectionItem: Identifiable, Hashable, Sendable {
-    let id: UUID; let collectionID: UUID; var title: String; var brand: String; var variant: String; var itemDescription: String; var state: ItemState; var quantity: Int; var barcode: Barcode?; var createdAt: Date; var updatedAt: Date; var consumedAt: Date?; var tags: [String]; var metadata: [String: MetadataValue]; var imageSystemName: String; var imageData: Data?; var importSourceKey: String?; var dateTags: [String: Date] = [:]; var ratings: [ItemRating] = []; var comments: [ItemComment] = []
+    let id: UUID; let collectionID: UUID; var title: String; var brand: String; var variant: String; var itemDescription: String; var state: ItemState; var quantity: Int; var barcode: Barcode?; var createdAt: Date; var updatedAt: Date; var consumedAt: Date?; var tags: [String]; var metadata: [String: MetadataValue]; var imageSystemName: String; var imageData: Data?; var importSourceKey: String?; var sourceSnapshot: ProductSourceSnapshot? = nil; var dateTags: [String: Date] = [:]; var ratings: [ItemRating] = []; var comments: [ItemComment] = []
     var earliestDateTag: Date? { dateTags.values.min() }
 }
 

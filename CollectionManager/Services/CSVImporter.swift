@@ -27,11 +27,33 @@ enum ImportColumnDestination: Hashable, Codable, Sendable {
     case newMetadata(MetadataFieldType)
 }
 
+enum ConditionalMappingAction: Hashable, Codable, Sendable {
+    case status(String)
+    case metadata(fieldID: UUID, value: String)
+}
+
+struct ConditionalMappingRule: Identifiable, Hashable, Codable, Sendable {
+    var id = UUID()
+    var sourceColumn: String
+    var equalsValue: String
+    var action: ConditionalMappingAction
+
+    func matches(headers: [String], row: [String]) -> Bool {
+        guard let index = headers.firstIndex(where: { $0.localizedCaseInsensitiveCompare(sourceColumn) == .orderedSame }), row.indices.contains(index) else { return false }
+        return row[index].trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare(equalsValue.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+    }
+}
+
 struct ImportPreparation: Identifiable, Sendable {
     let id = UUID()
     let drafts: [ImportDraft]
     let newMetadataFields: [MetadataFieldDefinition]
     let metadataFields: [MetadataFieldDefinition]
+}
+
+struct MetadataMappingPreparation: Sendable {
+    let metadata: [String: MetadataValue]
+    let newMetadataFields: [MetadataFieldDefinition]
 }
 
 struct CollectionImporter {
@@ -75,7 +97,7 @@ struct CollectionImporter {
         }
     }
 
-    nonisolated func prepareImport(from table: CSVImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition], sourceIdentifierColumn: Int? = nil) -> ImportPreparation {
+    nonisolated func prepareImport(from table: CSVImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition], sourceIdentifierColumn: Int? = nil, conditionalRules: [ConditionalMappingRule] = [], validStatusIDs: Set<String>? = nil) -> ImportPreparation {
         var usedNames = Set(existingMetadataFields.map { normalizedName($0.name) })
         var newFieldsByColumn: [Int: MetadataFieldDefinition] = [:]
         for (index, destination) in mapping.enumerated() {
@@ -119,7 +141,7 @@ struct CollectionImporter {
                 metadata[field.storageKey] = parsed
             }
 
-            return ImportDraft(
+            var draft = ImportDraft(
                 title: title,
                 brand: value(.brand),
                 variant: value(.variant),
@@ -131,9 +153,57 @@ struct CollectionImporter {
                 sourceIdentifier: sourceIdentifierColumn.map(rawValue(at:)),
                 metadata: metadata
             )
+            for rule in conditionalRules where rule.matches(headers: table.headers, row: row) {
+                switch rule.action {
+                case .status(let statusID):
+                    guard validStatusIDs?.contains(statusID) != false else { continue }
+                    draft.state = ItemState(rawValue: statusID)
+                case .metadata(let fieldID, let value):
+                    guard let field = existingByID[fieldID], let parsed = metadataValue(value.trimmingCharacters(in: .whitespacesAndNewlines), as: field.type, hint: field.name) else { continue }
+                    draft.metadata[field.storageKey] = parsed
+                }
+            }
+            return draft
         }
         let newFields = newFieldsByColumn.keys.sorted().compactMap { newFieldsByColumn[$0] }
         return ImportPreparation(drafts: drafts, newMetadataFields: newFields, metadataFields: existingMetadataFields + newFields)
+    }
+
+    nonisolated func suggestMetadataMapping(headers: [String], existingMetadataFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {
+        headers.map { header in
+            if let existing = existingMetadataFields.first(where: { normalizedName($0.name) == normalizedName(header) }) {
+                return .existingMetadata(existing.id)
+            }
+            return .ignore
+        }
+    }
+
+    nonisolated func prepareMetadataMapping(headers: [String], values: [String], mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition]) -> MetadataMappingPreparation {
+        var usedNames = Set(existingMetadataFields.map { normalizedName($0.name) })
+        var newFieldsByIndex: [Int: MetadataFieldDefinition] = [:]
+        for (index, destination) in mapping.enumerated() {
+            guard case .newMetadata(let type) = destination, headers.indices.contains(index) else { continue }
+            let baseName = displayName(for: headers[index])
+            var name = baseName
+            var suffix = 2
+            while usedNames.contains(normalizedName(name)) { name = "\(baseName) \(suffix)"; suffix += 1 }
+            usedNames.insert(normalizedName(name))
+            newFieldsByIndex[index] = MetadataFieldDefinition(name: name, type: type)
+        }
+
+        let existingByID = Dictionary(uniqueKeysWithValues: existingMetadataFields.map { ($0.id, $0) })
+        var metadata: [String: MetadataValue] = [:]
+        for (index, destination) in mapping.enumerated() where values.indices.contains(index) {
+            let field: MetadataFieldDefinition?
+            switch destination {
+            case .existingMetadata(let id): field = existingByID[id]
+            case .newMetadata: field = newFieldsByIndex[index]
+            default: field = nil
+            }
+            guard let field, let parsed = metadataValue(values[index].trimmingCharacters(in: .whitespacesAndNewlines), as: field.type, hint: headers.indices.contains(index) ? headers[index] : field.name) else { continue }
+            metadata[field.storageKey] = parsed
+        }
+        return MetadataMappingPreparation(metadata: metadata, newMetadataFields: newFieldsByIndex.keys.sorted().compactMap { newFieldsByIndex[$0] })
     }
 
     nonisolated private func suggestedStandardField(for header: String) -> HTMLImportField? {
@@ -196,7 +266,8 @@ struct CollectionImporter {
     }
 
     nonisolated private func displayName(for header: String) -> String {
-        let words = header.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        let words = header.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: #"[._/\-]+"#, with: " ", options: .regularExpression)
         let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Imported field" : trimmed.capitalized
     }

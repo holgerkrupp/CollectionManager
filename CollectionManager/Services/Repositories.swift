@@ -23,7 +23,8 @@ actor CollectionBackgroundRepository {
             let storedDates = (try? JSONDecoder().decode([String: Date].self, from: Data(record.dateTagsJSON.utf8))) ?? [:]
             let itemRatings = ratingsByItem[record.id, default: []].map { ItemRating(id: $0.id, itemID: $0.itemID, participantID: $0.participantID, participantName: $0.participantName, value: $0.value, updatedAt: $0.updatedAt) }.sorted { $0.participantName.localizedStandardCompare($1.participantName) == .orderedAscending }
             let itemComments = commentsByItem[record.id, default: []].map { ItemComment(id: $0.id, itemID: $0.itemID, participantID: $0.participantID, participantName: $0.participantName, text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt) }
-            return CollectionItem(id: record.id, collectionID: record.collectionID, title: record.title, brand: record.brand, variant: record.variant, itemDescription: record.itemDescription, state: ItemState(rawValue: record.stateRawValue), quantity: record.quantity, barcode: record.barcodeValue.flatMap { Barcode(rawValue: $0, type: record.barcodeType ?? "EAN-13") }, createdAt: record.createdAt, updatedAt: record.updatedAt, consumedAt: record.consumedAt, tags: tags, metadata: (try? JSONDecoder().decode([String: MetadataValue].self, from: Data(record.metadataJSON.utf8))) ?? [:], imageSystemName: record.imageSystemName, imageData: record.imageData, importSourceKey: record.importSourceKey, dateTags: storedDates, ratings: itemRatings, comments: itemComments)
+            let sourceSnapshot = record.sourceSnapshotJSON.flatMap { try? JSONDecoder().decode(ProductSourceSnapshot.self, from: Data($0.utf8)) }
+            return CollectionItem(id: record.id, collectionID: record.collectionID, title: record.title, brand: record.brand, variant: record.variant, itemDescription: record.itemDescription, state: ItemState(rawValue: record.stateRawValue), quantity: record.quantity, barcode: record.barcodeValue.flatMap { Barcode(rawValue: $0, type: record.barcodeType ?? "EAN-13") }, createdAt: record.createdAt, updatedAt: record.updatedAt, consumedAt: record.consumedAt, tags: tags, metadata: (try? JSONDecoder().decode([String: MetadataValue].self, from: Data(record.metadataJSON.utf8))) ?? [:], imageSystemName: record.imageSystemName, imageData: record.imageData, importSourceKey: record.importSourceKey, sourceSnapshot: sourceSnapshot, dateTags: storedDates, ratings: itemRatings, comments: itemComments)
         }
     }
 
@@ -125,8 +126,13 @@ actor CollectionBackgroundRepository {
         let records = (try? context.fetch(FetchDescriptor<CollectionRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))) ?? []
         let members = (try? context.fetch(FetchDescriptor<CollectionMemberRecord>())) ?? []
         var roles: [UUID: CollectionMemberRole] = [:]
-        for member in members where roles[member.collectionID] == nil { roles[member.collectionID] = member.role }
-        return records.map { model(from: $0, role: roles[$0.id] ?? .owner) }
+        for member in members where !member.participantID.hasPrefix("share:") && roles[member.collectionID] == nil { roles[member.collectionID] = member.role }
+        let names = Dictionary(grouping: members.filter { $0.participantID.hasPrefix("share:") && !$0.displayName.isEmpty }, by: \.collectionID)
+        return records.map { record in
+            var collection = model(from: record, role: roles[record.id] ?? .owner)
+            collection.sharedWith = names[record.id, default: []].map(\.displayName).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return collection
+        }
     }
     private func model(from record: CollectionRecord, role: CollectionMemberRole = .owner) -> CollectionModel {
         let data = Data(record.settingsJSON.utf8)
@@ -219,7 +225,21 @@ actor CollectionBackgroundRepository {
         enqueue(collectionID: collection.id, recordName: collection.id.uuidString, recordType: "Collection")
         save()
     }
-    func addItem(_ item: CollectionItem) { guard role(for: item.collectionID).canEdit else { return }; var item = item; item.tags = TagUtilities.applyingMergedTags(item.tags, rules: mergedTags(for: item.collectionID)); context.insert(ItemRecord(from: item)); context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "created")); enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem"); save() }
+    @discardableResult
+    func addItem(_ item: CollectionItem) -> Bool {
+        guard role(for: item.collectionID).canEdit else { return false }
+        let collectionID = item.collectionID
+        let identity = importIdentity(title: item.title, brand: item.brand, variant: item.variant)
+        let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        guard !records.contains(where: { importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity }) else { return false }
+        var item = item
+        item.tags = TagUtilities.applyingMergedTags(item.tags, rules: mergedTags(for: item.collectionID))
+        context.insert(ItemRecord(from: item))
+        context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "created"))
+        enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
+        save()
+        return true
+    }
     func webSyncs(for collectionID: UUID) -> [WebSyncRecord] { (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.urlString)]))) ?? [] }
     func collectionName(for collectionID: UUID) -> String {
         let id = collectionID
@@ -230,24 +250,30 @@ actor CollectionBackgroundRepository {
         guard let record = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
         return model(from: record).metadataFields
     }
+    func statuses(for collectionID: UUID) -> [CollectionStatus] {
+        let id = collectionID
+        guard let record = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
+        return model(from: record).statuses
+    }
     func addWebSync(_ sync: WebSyncRecord) { context.insert(sync); save() }
     func updateWebSync(_ sync: WebSyncRecord) { save() }
     func deleteWebSync(_ sync: WebSyncRecord) { context.delete(sync); save() }
     func setWebSync(_ sync: WebSyncRecord, lastSyncAt: Date?, error: String?) { sync.lastSyncAt = lastSyncAt; sync.lastError = error; save() }
-    func hasImportedItem(collectionID: UUID, sourceKey: String) -> Bool { let count = try? context.fetchCount(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID && $0.importSourceKey == sourceKey })); return (count ?? 0) > 0 }
+    func hasImportedItem(collectionID: UUID, sourceKey: String) -> Bool {
+        let normalizedSource = importSourceIdentity(sourceKey)
+        let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        return records.contains { $0.importSourceKey.map(importSourceIdentity) == normalizedSource }
+    }
     func importedSourceKeys(in collectionID: UUID) -> Set<String> {
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
-        return Set(records.compactMap(\.importSourceKey))
+        return Set(records.compactMap(\.importSourceKey).map(importSourceIdentity))
     }
     func importDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String) -> Bool {
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
-        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let brand = draft.brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let variant = draft.variant.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let existing = records.first(where: { $0.importSourceKey == sourceKey }) ?? records.first(where: {
-            $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == title &&
-            $0.brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == brand &&
-            $0.variant.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == variant
+        let normalizedSource = importSourceIdentity(sourceKey)
+        let identity = importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)
+        let existing = records.first(where: { $0.importSourceKey.map(importSourceIdentity) == normalizedSource }) ?? records.first(where: {
+            importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity
         })
         if let existing {
             let previous = existing.domain
@@ -258,50 +284,79 @@ actor CollectionBackgroundRepository {
             return false
         }
         let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey)
-        addItem(item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true
+        guard addItem(item) else { return false }
+        context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true
     }
     func importDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String)], collectionID: UUID) {
         guard role(for: collectionID).canEdit, !drafts.isEmpty else { return }
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
         let rules = mergedTags(for: collectionID)
         var bySource: [String: ItemRecord] = [:]
-        for record in records where bySource[record.importSourceKey ?? ""] == nil {
-            if let sourceKey = record.importSourceKey { bySource[sourceKey] = record }
+        for record in records {
+            if let sourceKey = record.importSourceKey.map(importSourceIdentity), bySource[sourceKey] == nil { bySource[sourceKey] = record }
         }
         var byIdentity: [String: ItemRecord] = [:]
         for record in records { byIdentity[importIdentity(title: record.title, brand: record.brand, variant: record.variant)] = record }
 
         for entry in drafts {
             let draft = entry.draft
-            let existing = bySource[entry.sourceKey] ?? byIdentity[importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)]
+            let sourceIdentity = importSourceIdentity(entry.sourceKey)
+            let existing = bySource[sourceIdentity] ?? byIdentity[importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)]
             if let existing {
                 let previous = existing.domain
                 var item = previous
                 item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.state = draft.state; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = entry.sourceKey; item.updatedAt = .now
                 existing.update(from: item)
                 context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: previous.state == item.state ? "imported" : "importedStateChanged"))
-                bySource[entry.sourceKey] = existing
+                bySource[sourceIdentity] = existing
                 byIdentity[importIdentity(title: item.title, brand: item.brand, variant: item.variant)] = existing
             } else {
                 let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
                 let record = ItemRecord(from: item)
                 context.insert(record); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "created")); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); enqueue(collectionID: collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
-                bySource[entry.sourceKey] = record
+                bySource[sourceIdentity] = record
                 byIdentity[importIdentity(title: item.title, brand: item.brand, variant: item.variant)] = record
             }
         }
         save()
     }
     func deduplicateItems(in collectionID: UUID) -> Int {
+        guard role(for: collectionID).canEdit else { return 0 }
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))) ?? []
-        var seen = Set<String>(); var removed = 0
+        var seenSources = Set<String>()
+        var seenItems = Set<String>()
+        var duplicateIDs = Set<UUID>()
         for record in records {
-            let source = record.importSourceKey?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard source?.isEmpty == false else { continue }
-            let key = "source:\(source!)"
-            if seen.insert(key).inserted { continue }; context.delete(record); enqueue(collectionID: collectionID, recordName: record.id.uuidString, recordType: "CollectionItem", operation: "delete"); removed += 1
+            let source = record.importSourceKey.map(importSourceIdentity).flatMap { $0.isEmpty ? nil : $0 }
+            let identity = importIdentity(title: record.title, brand: record.brand, variant: record.variant)
+            let isDuplicate = source.map(seenSources.contains) == true || seenItems.contains(identity)
+            if isDuplicate {
+                duplicateIDs.insert(record.id)
+            } else {
+                if let source { seenSources.insert(source) }
+                seenItems.insert(identity)
+            }
         }
-        if removed > 0 { save() }; return removed
+        guard !duplicateIDs.isEmpty else { return 0 }
+
+        let events = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        for record in records where duplicateIDs.contains(record.id) {
+            context.delete(record)
+            enqueue(collectionID: collectionID, recordName: record.id.uuidString, recordType: "CollectionItem", operation: "delete")
+        }
+        for event in events where duplicateIDs.contains(event.itemID) { context.delete(event) }
+        for rating in ratings where duplicateIDs.contains(rating.itemID) {
+            context.delete(rating)
+            enqueue(collectionID: collectionID, itemID: rating.itemID, recordName: CollaborationRecordNames.rating(itemID: rating.itemID, participantID: rating.participantID), recordType: "CollectionItemRating", operation: "delete")
+        }
+        for comment in comments where duplicateIDs.contains(comment.itemID) {
+            context.delete(comment)
+            enqueue(collectionID: collectionID, itemID: comment.itemID, recordName: CollaborationRecordNames.comment(comment.id), recordType: "CollectionItemComment", operation: "delete")
+        }
+        save()
+        return duplicateIDs.count
     }
     func deleteAllImportedItems(in collectionID: UUID) -> Int {
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
@@ -337,15 +392,41 @@ actor CollectionBackgroundRepository {
         if changed > 0 { save() }
         return changed
     }
-    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) -> Bool { let existing = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID && $0.importSourceKey == sourceKey })).first; if let existing { let previous = existing.domain; var item = previous; item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; if updateExistingState { item.state = draft.state; item.consumedAt = draft.state == .consumed ? (item.consumedAt ?? .now) : nil }; item.updatedAt = .now; existing.update(from: item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: updateExistingState && previous.state != item.state ? "importedStateChanged" : "imported")); save(); return false }; let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey); addItem(item); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); save(); return true }
+    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) -> Bool {
+        let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+        let sourceIdentity = importSourceIdentity(sourceKey)
+        let itemIdentity = importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)
+        let existing = records.first { record in
+            record.importSourceKey.map(importSourceIdentity) == sourceIdentity ||
+                importIdentity(title: record.title, brand: record.brand, variant: record.variant) == itemIdentity
+        }
+        if let existing {
+            let previous = existing.domain
+            var item = previous
+            item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = sourceKey
+            if updateExistingState { item.state = draft.state; item.consumedAt = draft.state == .consumed ? (item.consumedAt ?? .now) : nil }
+            item.updatedAt = .now
+            existing.update(from: item)
+            context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: updateExistingState && previous.state != item.state ? "importedStateChanged" : "imported"))
+            save()
+            return false
+        }
+        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: mergedTags(for: collectionID)), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: sourceKey)
+        guard addItem(item) else { return false }
+        context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported"))
+        save()
+        return true
+    }
     func applyWebDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)], collectionID: UUID) -> WebSyncApplyResult {
         guard role(for: collectionID).canEdit, !drafts.isEmpty else { return WebSyncApplyResult() }
         let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
         let rules = mergedTags(for: collectionID)
         var bySource: [String: ItemRecord] = [:]
-        for record in records where bySource[record.importSourceKey ?? ""] == nil {
-            if let sourceKey = record.importSourceKey { bySource[sourceKey] = record }
+        for record in records {
+            if let sourceKey = record.importSourceKey.map(importSourceIdentity), bySource[sourceKey] == nil { bySource[sourceKey] = record }
         }
+        var byIdentity: [String: ItemRecord] = [:]
+        for record in records { byIdentity[importIdentity(title: record.title, brand: record.brand, variant: record.variant)] = record }
         var added = 0
         var updated = 0
         var addedItems: [String] = []
@@ -353,7 +434,9 @@ actor CollectionBackgroundRepository {
 
         for entry in drafts {
             let draft = entry.draft
-            if let existing = bySource[entry.sourceKey] {
+            let sourceIdentity = importSourceIdentity(entry.sourceKey)
+            let itemIdentity = importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)
+            if let existing = bySource[sourceIdentity] ?? byIdentity[itemIdentity] {
                 let previous = existing.domain
                 var item = previous
                 item.title = draft.title; item.brand = draft.brand; item.variant = draft.variant; item.itemDescription = draft.description; item.quantity = draft.quantity; item.tags = TagUtilities.applyingMergedTags(draft.tags, rules: rules); item.barcode = draft.barcode ?? item.barcode; item.metadata.merge(draft.metadata) { _, imported in imported }; item.importSourceKey = entry.sourceKey
@@ -364,12 +447,15 @@ actor CollectionBackgroundRepository {
                 if entry.updateExistingState, previous.state != item.state {
                     matchedStateChanges.append(AutomaticSyncStateChange(title: item.title, newState: item.state))
                 }
+                bySource[sourceIdentity] = existing
+                byIdentity[importIdentity(title: item.title, brand: item.brand, variant: item.variant)] = existing
                 updated += 1
             } else {
                 let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: draft.state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: draft.state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: entry.sourceKey)
                 let record = ItemRecord(from: item)
                 context.insert(record); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "created")); context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported")); enqueue(collectionID: collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
-                bySource[entry.sourceKey] = record
+                bySource[sourceIdentity] = record
+                byIdentity[itemIdentity] = record
                 added += 1
                 addedItems.append(item.title)
             }
@@ -465,35 +551,64 @@ actor CollectionBackgroundRepository {
         }
         for snapshot in snapshots {
             let collectionID = snapshot.collection.id
+            let isShadowedPrivateSnapshot = snapshot.collection.role == .owner && sharedSnapshotsByCollection[collectionID] != nil
             let existingCollection = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first
             let canReportSharedItemChanges = existingCollection != nil
-            if let existingCollection {
-                existingCollection.name = snapshot.collection.name; existingCollection.icon = snapshot.collection.icon; existingCollection.subtitle = snapshot.collection.subtitle; existingCollection.updatedAt = .now
-                let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
-                existingCollection.settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? existingCollection.settingsJSON
+            let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
+            let settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}"
+            if let existingCollection, !isShadowedPrivateSnapshot {
+                if existingCollection.name != snapshot.collection.name ||
+                    existingCollection.icon != snapshot.collection.icon ||
+                    existingCollection.subtitle != snapshot.collection.subtitle ||
+                    existingCollection.settingsJSON != settingsJSON {
+                    existingCollection.name = snapshot.collection.name
+                    existingCollection.icon = snapshot.collection.icon
+                    existingCollection.subtitle = snapshot.collection.subtitle
+                    existingCollection.settingsJSON = settingsJSON
+                    existingCollection.updatedAt = .now
+                }
             } else {
-                let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
-                let settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}"
-                context.insert(CollectionRecord(id: collectionID, name: snapshot.collection.name, icon: snapshot.collection.icon, subtitle: snapshot.collection.subtitle, settingsJSON: settingsJSON))
+                if existingCollection == nil {
+                    context.insert(CollectionRecord(id: collectionID, name: snapshot.collection.name, icon: snapshot.collection.icon, subtitle: snapshot.collection.subtitle, settingsJSON: settingsJSON))
+                }
             }
+            let effectiveRole = sharedSnapshotsByCollection[collectionID]?.collection.role ?? snapshot.collection.role
             let memberships = (try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             if memberships.isEmpty {
-                context.insert(CollectionMemberRecord(collectionID: collectionID, participantID: "cloud", role: snapshot.collection.role))
+                context.insert(CollectionMemberRecord(collectionID: collectionID, participantID: "cloud", role: effectiveRole))
             } else {
                 // A failed early share could leave an editor with a private
                 // duplicate and an owner membership. Private snapshots are
                 // merged first and shared snapshots last, so update every
                 // membership here to make the shared role authoritative.
                 for membership in memberships {
-                    membership.role = snapshot.collection.role
-                    membership.updatedAt = .now
+                    if membership.role != effectiveRole {
+                        membership.role = effectiveRole
+                        membership.updatedAt = .now
+                    }
+                }
+            }
+            if let sharedWith = snapshot.sharedWith {
+                let cachedParticipants = memberships.filter { $0.participantID.hasPrefix("share:") }
+                let participantIDs = Set(sharedWith.map { "share:" + $0.id })
+                for cached in cachedParticipants where !participantIDs.contains(cached.participantID) { context.delete(cached) }
+                for participant in sharedWith {
+                    let participantID = "share:" + participant.id
+                    if let cached = cachedParticipants.first(where: { $0.participantID == participantID }) {
+                        if cached.displayName != participant.displayName {
+                            cached.displayName = participant.displayName
+                            cached.updatedAt = .now
+                        }
+                    } else {
+                        context.insert(CollectionMemberRecord(collectionID: collectionID, participantID: participantID, displayName: participant.displayName, role: effectiveRole))
+                    }
                 }
             }
             let existingItems = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             var itemsByID = Dictionary(uniqueKeysWithValues: existingItems.map { ($0.id, $0) })
             for item in snapshot.items {
                 if let record = itemsByID[item.id] {
-                    if item.updatedAt >= record.updatedAt { record.update(from: item) }
+                    if item.updatedAt > record.updatedAt { record.update(from: item) }
                 } else {
                     let record = ItemRecord(from: item)
                     context.insert(record)
@@ -521,7 +636,7 @@ actor CollectionBackgroundRepository {
             for rating in snapshot.ratings {
                 let existing = existingRatings.first(where: { $0.itemID == rating.itemID && $0.participantID == rating.participantID })
                 if let existing {
-                    if rating.updatedAt >= existing.updatedAt { existing.value = rating.value; existing.participantName = rating.participantName; existing.updatedAt = rating.updatedAt }
+                    if rating.updatedAt > existing.updatedAt { existing.value = rating.value; existing.participantName = rating.participantName; existing.updatedAt = rating.updatedAt }
                 } else { context.insert(ItemRatingRecord(id: rating.id, itemID: rating.itemID, collectionID: collectionID, participantID: rating.participantID, participantName: rating.participantName, value: rating.value, updatedAt: rating.updatedAt)) }
             }
             let existingComments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
@@ -529,7 +644,7 @@ actor CollectionBackgroundRepository {
             for comment in existingComments where !snapshotCommentIDs.contains(comment.id) { context.delete(comment) }
             for comment in snapshot.comments {
                 if let existing = existingComments.first(where: { $0.id == comment.id }) {
-                    if comment.updatedAt >= existing.updatedAt { existing.text = comment.text; existing.participantName = comment.participantName; existing.updatedAt = comment.updatedAt }
+                    if comment.updatedAt > existing.updatedAt { existing.text = comment.text; existing.participantName = comment.participantName; existing.updatedAt = comment.updatedAt }
                 } else { context.insert(ItemCommentRecord(id: comment.id, itemID: comment.itemID, collectionID: collectionID, participantID: comment.participantID, participantName: comment.participantName, text: comment.text, createdAt: comment.createdAt, updatedAt: comment.updatedAt)) }
             }
             let existingEvents = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
@@ -554,6 +669,7 @@ actor CollectionBackgroundRepository {
     }
     private func enqueue(collectionID: UUID, itemID: UUID? = nil, recordName: String, recordType: String, operation: String = "save") { context.insert(SyncMutationRecord(collectionID: collectionID, itemID: itemID, recordName: recordName, recordType: recordType, operation: operation)) }
     private func hasCollectionMembership(_ collectionID: UUID) -> Bool { let id = collectionID; return ((try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id }))) ?? []).isEmpty == false }
-    private func importIdentity(title: String, brand: String, variant: String) -> String { [title, brand, variant].map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.joined(separator: "\u{1f}") }
+    private func importSourceIdentity(_ sourceKey: String) -> String { sourceKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    private func importIdentity(title: String, brand: String, variant: String) -> String { [title, brand, variant].map(importSourceIdentity).joined(separator: "\u{1f}") }
     private func save() { try? context.save() }
 }

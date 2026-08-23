@@ -53,6 +53,7 @@ struct HTMLMappingView: View {
     let table: HTMLImportTable
     let sourceURL: String
     @State private var mapping: [ImportColumnDestination]
+    @State private var conditionalRules: [ConditionalMappingRule] = []
     @State private var preparation: ImportPreparation?
     @State private var didSuggestMapping = false
     @State private var fixedState: ItemState?
@@ -94,6 +95,7 @@ struct HTMLMappingView: View {
                     }
                 }
             }
+            ConditionalMappingRulesSection(headers: table.headers, statuses: store.statuses, metadataFields: store.selectedCollection?.metadataFields ?? [], rules: $conditionalRules)
             Section("Import status") {
                 Picker("Status for imported items", selection: $fixedState) {
                     Text("Use status from source").tag(ItemState?.none)
@@ -162,7 +164,7 @@ struct HTMLMappingView: View {
 
     private func makePreparation() -> ImportPreparation {
         let fields = store.selectedCollection?.metadataFields ?? []
-        let prepared = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: fields)
+        let prepared = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: fields, conditionalRules: conditionalRules, validStatusIDs: Set(store.statuses.map(\.id)))
         var drafts = prepared.drafts
         if let fixedState {
             for index in drafts.indices { drafts[index].state = fixedState }
@@ -190,7 +192,7 @@ struct HTMLMappingView: View {
 
     private func saveBackgroundSyncIfNeeded(preparation: ImportPreparation) {
         guard saveForBackgroundSync, canSaveBackgroundSync, let collectionID = store.selectedCollection?.id else { return }
-        store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name, headers: table.headers, mapping: resolvedMapping(using: preparation.newMetadataFields), intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+        store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name, headers: table.headers, mapping: resolvedMapping(using: preparation.newMetadataFields), conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
     }
 
     private func resolvedMapping(using newFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {

@@ -27,6 +27,7 @@ struct WebSyncResult: Sendable {
             let tables = try await HTMLImporter().load(url: url)
             guard let table = tables.first(where: { $0.name == configuration.tableName }) ?? tables.first else { throw HTMLImportError.noObjects }
             let metadataFields = repository.metadataFields(for: configuration.collectionID)
+            let validStatusIDs = Set(repository.statuses(for: configuration.collectionID).map(\.id))
             let mapping: [ImportColumnDestination]
             if configuration.mapping.count == table.headers.count {
                 mapping = configuration.mapping
@@ -38,7 +39,7 @@ struct WebSyncResult: Sendable {
                     return destination
                 }
             }
-            let drafts = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: metadataFields).drafts.map { draft in
+            let drafts = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: metadataFields, conditionalRules: configuration.conditionalRules, validStatusIDs: validStatusIDs).drafts.map { draft in
                 var updated = draft
                 updated.tags = TagUtilities.tags(title: draft.title, existing: draft.tags, rawTags: draft.tags.joined(separator: ","), options: configuration.tagOptions)
                 return updated
@@ -49,7 +50,7 @@ struct WebSyncResult: Sendable {
                 let key = sourceKey(configuration, draft: draft)
                 var effectiveDraft = draft
                 if let fixedState = configuration.fixedState { effectiveDraft.state = fixedState }
-                if !configuration.addNewItems && !existingSourceKeys.contains(key) { continue }
+                if !configuration.addNewItems && !existingSourceKeys.contains(key.lowercased()) { continue }
                 entries.append((effectiveDraft, key, configuration.updateExistingStates))
             }
             let counts = repository.applyWebDrafts(entries, collectionID: configuration.collectionID)

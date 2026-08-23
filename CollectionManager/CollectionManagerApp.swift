@@ -101,7 +101,7 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
                         await store.acceptShare(metadata: metadata)
                     }
                     store.loadCollections()
-                    WebSyncScheduler.schedule()
+                    WebSyncScheduler.schedule(context: container.mainContext)
                     // Keep launch local and responsive. Sync starts after the
                     // first frame and is skipped when the process has no
                     // CloudKit entitlement (for example an unsigned simulator build).

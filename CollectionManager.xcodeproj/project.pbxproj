@@ -72,6 +72,9 @@
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* CollectionManager */,
 			);
+			packageProductDependencies = (
+				000000000000000200000001 /* SFSymbolSelector */,
+			);
 			name = CollectionManager;
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* CollectionManager.app */;
@@ -101,6 +104,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -392,6 +398,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../SFSymbolSelector;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		000000000000000200000001 /* SFSymbolSelector */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */;
+			productName = SFSymbolSelector;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }

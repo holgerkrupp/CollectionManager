@@ -56,10 +56,18 @@ struct WebSyncRow: View {
                 if let error = sync.lastError { Text(error).font(.caption2).foregroundStyle(.red).lineLimit(1) }
             }
             Spacer()
+            if let url = URL(string: sync.urlString), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                Link(destination: url) { Image(systemName: "safari") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Open in default browser")
+            }
             Button(action: onEdit) { Image(systemName: "pencil") }.buttonStyle(.borderless)
             Button { Task { await store.syncWebSource(sync) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless)
         }
         .contextMenu {
+            if let url = URL(string: sync.urlString), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                Link(destination: url) { Label("Open in default browser", systemImage: "safari") }
+            }
             Button(action: onEdit) { Label("Edit", systemImage: "pencil") }
             Button { Task { await store.syncWebSource(sync) } } label: { Label("Sync now", systemImage: "arrow.clockwise") }
             Button(role: .destructive) { store.deleteWebSync(sync) } label: { Label("Remove source", systemImage: "trash") }
@@ -82,6 +90,7 @@ struct WebSyncEditorView: View {
     @State private var tables: [HTMLImportTable] = []
     @State private var selectedTable = 0
     @State private var mapping: [ImportColumnDestination]
+    @State private var conditionalRules: [ConditionalMappingRule]
     @State private var intervalMinutes: Int
     @State private var addNewItems: Bool
     @State private var updateExistingStates: Bool
@@ -100,6 +109,7 @@ struct WebSyncEditorView: View {
         existingSync = sync
         _urlString = State(initialValue: sync?.urlString ?? "")
         _mapping = State(initialValue: sync?.mapping ?? [])
+        _conditionalRules = State(initialValue: sync?.conditionalRules ?? [])
         _intervalMinutes = State(initialValue: sync?.intervalMinutes ?? 360)
         _addNewItems = State(initialValue: sync?.addNewItems ?? true)
         _updateExistingStates = State(initialValue: sync?.updateExistingStates ?? true)
@@ -138,6 +148,7 @@ struct WebSyncEditorView: View {
                             )
                         }
                     }
+                    ConditionalMappingRulesSection(headers: tables[selectedTable].headers, statuses: store.statuses, metadataFields: store.selectedCollection?.metadataFields ?? [], rules: $conditionalRules)
                 }
                 Section("Reconciliation") {
                     Picker("Check for updates", selection: $intervalMinutes) { ForEach(intervals, id: \.self) { Text(intervalLabel($0)).tag($0) } }
@@ -183,10 +194,11 @@ struct WebSyncEditorView: View {
             existingSync.tableName = table.name
             existingSync.headersJSON = (try? String(data: JSONEncoder().encode(table.headers), encoding: .utf8)) ?? "[]"
             existingSync.mappingJSON = (try? String(data: JSONEncoder().encode(persistedMapping), encoding: .utf8)) ?? "[]"
+            existingSync.conditionalRulesJSON = (try? String(data: JSONEncoder().encode(conditionalRules), encoding: .utf8)) ?? "[]"
             existingSync.intervalMinutes = intervalMinutes; existingSync.addNewItems = addNewItems; existingSync.updateExistingStates = updateExistingStates; existingSync.fixedStateRawValue = fixedState?.rawValue; existingSync.tagSeparators = tagSeparators; existingSync.splitTagsOnWhitespace = splitTagsOnWhitespace; existingSync.generateTagsFromTitle = generateTagsFromTitle; existingSync.titleTagModeRawValue = titleTagMode.rawValue; existingSync.titleSeparators = titleSeparators
             store.updateWebSync(existingSync)
         } else {
-            store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: persistedMapping, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+            store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: persistedMapping, conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
         }
         dismiss()
     }

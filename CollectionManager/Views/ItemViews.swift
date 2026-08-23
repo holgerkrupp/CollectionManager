@@ -225,43 +225,168 @@ private struct TagFlowLayout: Layout {
     }
 }
 
+private struct ProductLookupSuggestions {
+    var title: String?
+    var brand: String?
+    var variant: String?
+    var tags: String?
+    var metadata: [String: MetadataValue] = [:]
+}
+
+private struct ProductNameLookupControl: View {
+    let query: String
+    let onSelect: (ProductMetadata) -> Void
+    @State private var isSearching = false
+    @State private var message: String?
+    @State private var results: [ProductMetadata] = []
+    @State private var showingResults = false
+    @State private var searchTask: Task<Void, Never>?
+
+    var body: some View {
+        Button { search() } label: {
+            HStack {
+                Label(isSearching ? "Searching products…" : "Find Product Details by Name", systemImage: "text.magnifyingglass")
+                Spacer()
+                if isSearching { ProgressView().controlSize(.small) }
+            }
+        }
+        .disabled(trimmedQuery.count < 2 || isSearching)
+        if let message {
+            Text(message).font(.footnote).foregroundStyle(.secondary)
+        }
+        EmptyView()
+            .sheet(isPresented: $showingResults) {
+                ProductNameSearchResultsView(query: trimmedQuery, products: results) { product in
+                    onSelect(product)
+                    message = "Product details applied. Review them before saving."
+                }
+            }
+            .onDisappear { searchTask?.cancel() }
+    }
+
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func search() {
+        let submittedQuery = trimmedQuery
+        guard submittedQuery.count >= 2 else { return }
+        searchTask?.cancel()
+        isSearching = true
+        message = nil
+        searchTask = Task {
+            do {
+                let products = try await OpenFoodFactsNameSearchProvider().products(matching: submittedQuery)
+                guard !Task.isCancelled else { return }
+                results = products
+                if products.isEmpty {
+                    message = "No matching products were found. Try including the brand or expression."
+                } else {
+                    showingResults = true
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                message = "\(error.localizedDescription) Try again later or enter the details manually."
+            }
+            guard !Task.isCancelled else { return }
+            isSearching = false
+            searchTask = nil
+        }
+    }
+}
+
+private struct ProductNameSearchResultsView: View {
+    @Environment(\.dismiss) private var dismiss
+    let query: String
+    let products: [ProductMetadata]
+    let onSelect: (ProductMetadata) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(products.enumerated()), id: \.offset) { _, product in
+                        Button {
+                            onSelect(product)
+                            dismiss()
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                if let imageURL = product.imageURL {
+                                    AsyncImage(url: imageURL) { image in
+                                        image.resizable().scaledToFit()
+                                    } placeholder: {
+                                        ProgressView()
+                                    }
+                                    .frame(width: 48, height: 64)
+                                    .clipShape(.rect(cornerRadius: 6))
+                                } else {
+                                    Image(systemName: "wineglass").frame(width: 48, height: 48).foregroundStyle(.secondary)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(product.title).font(.headline).foregroundStyle(.primary)
+                                    if !product.brand.isEmpty { Text(product.brand).foregroundStyle(.secondary) }
+                                    if !product.variant.isEmpty { Text(product.variant).font(.subheadline).foregroundStyle(.secondary) }
+                                    if let barcode = product.barcode { Text(barcode.value).font(.caption.monospacedDigit()).foregroundStyle(.tertiary) }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } footer: {
+                    Text("Select the matching product to fill its name, brand, variant, barcode, categories, and available product metadata.")
+                }
+            }
+            .navigationTitle("Results for “\(query)”")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+    }
+}
+
 struct AddItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
-    @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var recognitionMessage: String?; @State private var productMatches: [CollectionProductMatch] = []; @State private var pendingScannedBarcode: Barcode?
+    @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var sourceSnapshot: ProductSourceSnapshot?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var showingMetadataMapping = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var lookupMessage: String?; @State private var photoMessage: String?; @State private var productMatches: [CollectionProductMatch] = []; @State private var lookupTask: Task<Void, Never>?; @State private var lookupSuggestions = ProductLookupSuggestions()
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
             Form {
-                Section("Identify") {
-                    if category.supportsBarcodeScanning {
-                        Button { showingScanner = true } label: {
-                            Label(barcode.map { "Scanned \($0.value)" } ?? "Scan Barcode", systemImage: "barcode.viewfinder")
+                Section {
+                    HStack {
+                        Label("Barcode", systemImage: "barcode")
+                        Spacer(minLength: 12)
+                        TextField("Number", text: $manualBarcode)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .onChange(of: manualBarcode) { _, newValue in updateBarcode(from: newValue) }
+                            .accessibilityLabel("Barcode")
+                        if category.supportsBarcodeScanning {
+                            Button { showingScanner = true } label: {
+                                Image(systemName: "barcode.viewfinder")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Scan barcode")
+                            .accessibilityHint("Opens the camera barcode scanner")
                         }
-                        .accessibilityHint("Opens the camera barcode scanner")
                     }
 
-                    HStack {
-                        TextField("Enter barcode manually", text: $manualBarcode)
-                            .keyboardType(.numberPad)
-                            .accessibilityLabel("Barcode")
-                        Button("Use") {
-                            if let value = Barcode(rawValue: manualBarcode) {
-                                selectBarcode(value)
-                            } else {
-                                recognitionMessage = "Enter a valid 8, 12, 13, or 14 digit barcode."
+                    if category.supportsBarcodeScanning {
+                        Button {
+                            if let barcode { lookup(barcode) }
+                        } label: {
+                            HStack {
+                                Label(isLookingUp ? "Looking up product…" : "Look Up Product", systemImage: "magnifyingglass")
+                                Spacer()
+                                if isLookingUp {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
                             }
                         }
+                        .disabled(barcode == nil || isLookingUp)
                     }
 
                     if let barcode {
-                        HStack {
-                            Label("Barcode: \(barcode.value)", systemImage: "barcode")
-                            Spacer()
-                            if category.supportsBarcodeScanning {
-                                Button(isLookingUp ? "Looking up…" : "Look up product") { lookup(barcode) }
-                                    .disabled(isLookingUp)
-                            }
-                        }
                         if let status = store.barcodeStatus(barcode) {
                             let configuredStatus = store.status(for: status)
                             Label(status == .consumed ? "Already consumed in this collection" : status == .stored ? "Currently in storage" : "Already in collection: \(configuredStatus.name)", systemImage: configuredStatus.symbol)
@@ -269,11 +394,72 @@ struct AddItemView: View {
                         }
                     }
 
+                    if !manualBarcode.isEmpty, barcode == nil {
+                        Text("Enter a valid 8, 12, 13, or 14 digit barcode.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if let lookupMessage {
+                        Text(lookupMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Identify")
+                } footer: {
+                    if category.supportsBarcodeScanning {
+                        Text("Product lookup sends only the barcode. Results are suggestions and never replace changes you make while lookup is running.")
+                    }
+                }
+
+                Section("Item details") {
+                    TextField("Title", text: $title)
+                    if category == .food {
+                        ProductNameLookupControl(query: title, onSelect: applyNameLookupResult)
+                    }
+                    TextField("Brand", text: $brand)
+                    TextField("Variant", text: $variant)
+                    TextField("Description", text: $description, axis: .vertical)
+                    Stepper("Quantity: \(quantity)", value: $quantity, in: 1...999)
+                    Picker("Status", selection: $state) { ForEach(store.statuses) { status in Text(status.name).tag(ItemState(rawValue: status.id)) } }
+                    TextField("Tags, separated by commas", text: $tags)
+                }
+
+                if !category.detailFields.isEmpty {
+                    Section("\(category.name) details") {
+                        ForEach(category.detailFields, id: \.key) { field in
+                            TextField(field.title, text: metadataBinding(for: field.key), prompt: Text(field.placeholder))
+                        }
+                    }
+                }
+
+                if let fields = store.selectedCollection?.metadataFields, !fields.isEmpty {
+                    CustomMetadataFieldsSection(fields: fields, metadata: $metadata)
+                }
+
+                if let sourceSnapshot {
+                    Section("Product metadata") {
+                        Button { showingMetadataMapping = true } label: { Label("Map API fields", systemImage: "arrow.triangle.branch") }
+                        Text("\(sourceSnapshot.provider) snapshot from \(sourceSnapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Photo") {
                     Button { showingCamera = true } label: { Label("Take Photo", systemImage: "camera") }
                     PhotosPicker(selection: $pickerItem, matching: .images) { Label("Choose Existing Photo", systemImage: "photo") }
                         .onChange(of: pickerItem) { _, newValue in
                             Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { handleImage(data) } }
                         }
+                    if imageData != nil {
+                        Label("Photo added", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    if let photoMessage {
+                        Text(photoMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if !productMatches.isEmpty {
@@ -293,101 +479,214 @@ struct AddItemView: View {
                         }
                     }
                 }
-
-                if !category.detailFields.isEmpty {
-                    Section("\(category.name) details") {
-                        ForEach(category.detailFields, id: \.key) { field in
-                            TextField(field.title, text: metadataBinding(for: field.key), prompt: Text(field.placeholder))
-                        }
-                    }
-                }
-
-                if let fields = store.selectedCollection?.metadataFields, !fields.isEmpty {
-                    CustomMetadataFieldsSection(fields: fields, metadata: $metadata)
-                }
-
-                Section("Editable proposal") {
-                    TextField("Title", text: $title)
-                    TextField("Brand", text: $brand)
-                    TextField("Variant", text: $variant)
-                    TextField("Description", text: $description, axis: .vertical)
-                    Stepper("Quantity: \(quantity)", value: $quantity, in: 1...999)
-                    Picker("Status", selection: $state) { ForEach(store.statuses) { status in Text(status.name).tag(ItemState(rawValue: status.id)) } }
-                    TextField("Tags, separated by commas", text: $tags)
-                }
-
-                if let recognitionMessage { Section { Text(recognitionMessage).font(.footnote).foregroundStyle(.secondary) } }
-                Section { Text("Barcode lookup uses the free Open Food Facts service and sends only the barcode. OCR and product results are suggestions—review the proposal before saving.").font(.footnote).foregroundStyle(.secondary) }
             }
             .navigationTitle("Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData)
+                        lookupTask?.cancel()
+                        store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData, sourceSnapshot: sourceSnapshot)
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .sheet(isPresented: $showingScanner, onDismiss: finishScannerHandoff) {
+            .sheet(isPresented: $showingScanner) {
                 BarcodeScannerSheet { value in
-                    barcode = value
-                    manualBarcode = value.value
-                    productMatches = []
-                    isLookingUp = false
-                    recognitionMessage = "Barcode detected: \(value.value)"
-                    pendingScannedBarcode = value
+                    selectBarcode(value)
+                    lookup(value)
                 }
+            }
+            .sheet(isPresented: $showingMetadataMapping) {
+                if let sourceSnapshot { ProductMetadataMappingView(snapshot: sourceSnapshot, metadata: $metadata) }
             }
             .fullScreenCover(isPresented: $showingCamera) { PhotoCaptureView { handleImage($0) } }
             .onAppear { if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) } }
+            .onDisappear { lookupTask?.cancel() }
         }
     }
+    private func updateBarcode(from rawValue: String) {
+        let value = Barcode(rawValue: rawValue)
+        guard value != barcode else { return }
+        lookupTask?.cancel()
+        lookupTask = nil
+        clearLookupSuggestions()
+        barcode = value
+        isLookingUp = false
+        lookupMessage = nil
+        productMatches = []
+    }
     private func selectBarcode(_ value: Barcode) {
+        lookupTask?.cancel()
+        lookupTask = nil
+        if barcode != value { clearLookupSuggestions() }
         barcode = value
         manualBarcode = value.value
         isLookingUp = false
-        recognitionMessage = "Barcode selected: \(value.value)"
-        Task {
-            await Task.yield()
-            guard barcode == value else { return }
-            productMatches = store.productMatches(for: value)
+        lookupMessage = nil
+        productMatches = []
+    }
+    private func lookup(_ value: Barcode) {
+        let provider: any ProductMetadataProvider
+        switch store.selectedCollection?.category {
+        case .food: provider = OpenFoodFactsProvider()
+        case .games: provider = FirstMatchProductProvider(providers: [GamesEANProvider(), OpenFactsProvider(host: "world.openproductsfacts.org")])
+        case .boardGames: provider = FirstMatchProductProvider(providers: [GameUPCProvider(), OpenFactsProvider(host: "world.openproductsfacts.org")])
+        case .books: provider = OpenLibraryProvider()
+        case .music: provider = MusicBrainzProvider()
+        case .cosmetics: provider = OpenFactsProvider(host: "world.openbeautyfacts.org")
+        case .petFood: provider = OpenFactsProvider(host: "world.openpetfoodfacts.org")
+        case .products: provider = OpenFactsProvider(host: "world.openproductsfacts.org")
+        default:
+            lookupMessage = "Product lookup is not configured for this collection category yet."
+            return
+        }
+
+        lookupTask?.cancel()
+        let startingTitle = title
+        let startingBrand = brand
+        let startingVariant = variant
+        let startingTags = tags
+        let startingMetadata = metadata
+        isLookingUp = true
+        lookupMessage = nil
+
+        lookupTask = Task {
+            do {
+                let product = try await provider.product(for: value)
+                guard !Task.isCancelled, barcode == value else { return }
+                if let product {
+                    sourceSnapshot = product.sourceSnapshot
+                    var appliedSuggestions = ProductLookupSuggestions()
+                    if startingTitle.isEmpty, title == startingTitle, !product.title.isEmpty {
+                        title = product.title
+                        appliedSuggestions.title = product.title
+                    }
+                    if startingBrand.isEmpty, brand == startingBrand, !product.brand.isEmpty {
+                        brand = product.brand
+                        appliedSuggestions.brand = product.brand
+                    }
+                    if startingVariant.isEmpty, variant == startingVariant, !product.variant.isEmpty {
+                        variant = product.variant
+                        appliedSuggestions.variant = product.variant
+                    }
+                    let suggestedTags = product.categories.joined(separator: ", ")
+                    if startingTags.isEmpty, tags == startingTags, !suggestedTags.isEmpty {
+                        tags = suggestedTags
+                        appliedSuggestions.tags = suggestedTags
+                    }
+                    if let appliedValue = applyLookupValue(product.country, for: "country", startingMetadata: startingMetadata) {
+                        appliedSuggestions.metadata["country"] = appliedValue
+                    }
+                    if let appliedValue = applyLookupValue(suggestedTags, for: "categories", startingMetadata: startingMetadata) {
+                        appliedSuggestions.metadata["categories"] = appliedValue
+                    }
+                    for (key, suggestedValue) in product.extraFields {
+                        if let appliedValue = applyLookupValue(suggestedValue, for: key, startingMetadata: startingMetadata) {
+                            appliedSuggestions.metadata[key] = appliedValue
+                        }
+                    }
+                    lookupSuggestions = appliedSuggestions
+                    productMatches = store.productMatches(for: value, productName: product.title)
+                    lookupMessage = "Product data found. Review the suggested details before saving."
+                } else {
+                    productMatches = store.productMatches(for: value)
+                    lookupMessage = "No product was found. You can still enter the item manually."
+                }
+            } catch {
+                guard !Task.isCancelled, barcode == value else { return }
+                productMatches = store.productMatches(for: value)
+                lookupMessage = "\(error.localizedDescription) You can still enter the item manually."
+            }
+            guard !Task.isCancelled, barcode == value else { return }
+            isLookingUp = false
+            lookupTask = nil
         }
     }
-    private func finishScannerHandoff() {
-        guard let value = pendingScannedBarcode else { return }
-        pendingScannedBarcode = nil
-        guard barcode == value else { return }
-        lookup(value)
+    @discardableResult
+    private func applyLookupValue(_ suggestedValue: String?, for key: String, startingMetadata: [String: MetadataValue]) -> MetadataValue? {
+        guard let suggestedValue, !suggestedValue.isEmpty, metadata[key] == startingMetadata[key] else { return nil }
+        if let startingValue = startingMetadata[key], !startingValue.displayValue.isEmpty { return nil }
+        let value = MetadataValue.string(suggestedValue)
+        metadata[key] = value
+        return value
     }
-    private func lookup(_ value: Barcode) { let provider: any ProductMetadataProvider; switch store.selectedCollection?.category { case .food: provider = OpenFoodFactsProvider(); case .games: provider = GamesEANProvider(); case .boardGames: provider = GameUPCProvider(); case .books: provider = OpenLibraryProvider(); case .music: provider = MusicBrainzProvider(); case .cosmetics: provider = OpenFactsProvider(host: "world.openbeautyfacts.org"); case .petFood: provider = OpenFactsProvider(host: "world.openpetfoodfacts.org"); case .products: provider = OpenFactsProvider(host: "world.openproductsfacts.org"); default: recognitionMessage = "Product lookup is not configured for this collection category yet."; return }; isLookingUp = true; recognitionMessage = "Barcode detected: \(value.value). Looking up product…"; Task { await Task.yield(); guard barcode == value else { return }; productMatches = store.productMatches(for: value); do { if let product = try await provider.product(for: value) { await MainActor.run { guard barcode == value else { return }; if title.isEmpty { title = product.title }; if brand.isEmpty { brand = product.brand }; if variant.isEmpty { variant = product.variant }; if tags.isEmpty { tags = product.categories.joined(separator: ", ") }; if let country = product.country, !country.isEmpty { metadata["country"] = .string(country) }; if !product.categories.isEmpty { metadata["categories"] = .string(product.categories.joined(separator: ", ")) }; for (key, value) in product.extraFields { metadata[key] = .string(value) }; productMatches = store.productMatches(for: value, productName: product.title); recognitionMessage = "Product data found. Review the proposal before saving." } } else { await MainActor.run { guard barcode == value else { return }; recognitionMessage = "No product was found for this barcode." } } } catch { await MainActor.run { guard barcode == value else { return }; recognitionMessage = "\(error.localizedDescription) You can still enter the item manually." } }; await MainActor.run { if barcode == value { isLookingUp = false } } } }
+    private func clearLookupSuggestions() {
+        if let suggestedTitle = lookupSuggestions.title, title == suggestedTitle { title = "" }
+        if let suggestedBrand = lookupSuggestions.brand, brand == suggestedBrand { brand = "" }
+        if let suggestedVariant = lookupSuggestions.variant, variant == suggestedVariant { variant = "" }
+        if let suggestedTags = lookupSuggestions.tags, tags == suggestedTags { tags = "" }
+        for (key, suggestedValue) in lookupSuggestions.metadata where metadata[key] == suggestedValue {
+            metadata.removeValue(forKey: key)
+        }
+        sourceSnapshot = nil
+        lookupSuggestions = ProductLookupSuggestions()
+    }
     private func metadataBinding(for key: String) -> Binding<String> { Binding(get: { if case .string(let value) = metadata[key] { return value }; return metadata[key]?.displayValue ?? "" }, set: { metadata[key] = .string($0) }) }
+    private func applyNameLookupResult(_ product: ProductMetadata) {
+        if !product.title.isEmpty { title = product.title }
+        if !product.brand.isEmpty { brand = product.brand }
+        if !product.variant.isEmpty { variant = product.variant }
+        if let productBarcode = product.barcode {
+            barcode = productBarcode
+            manualBarcode = productBarcode.value
+            productMatches = store.productMatches(for: productBarcode, productName: product.title)
+        }
+        mergeLookupDetails(from: product)
+        sourceSnapshot = product.sourceSnapshot
+        loadLookupImageIfNeeded(from: product.imageURL)
+    }
+    private func mergeLookupDetails(from product: ProductMetadata) {
+        var existingTags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        var tagKeys = Set(existingTags.map { $0.lowercased() })
+        for category in product.categories where tagKeys.insert(category.lowercased()).inserted { existingTags.append(category) }
+        tags = existingTags.joined(separator: ", ")
+        let details = product.extraFields.merging(["country": product.country ?? "", "categories": product.categories.joined(separator: ", ")]) { current, _ in current }
+        for (key, value) in details where !value.isEmpty && (metadata[key]?.displayValue.isEmpty ?? true) { metadata[key] = .string(value) }
+    }
+    private func loadLookupImageIfNeeded(from url: URL?) {
+        guard imageData == nil, let url else { return }
+        Task {
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return }
+            let prepared = await ImageProcessor.preparedData(data)
+            guard imageData == nil else { return }
+            imageData = prepared
+            photoMessage = "Product image added from the lookup result."
+        }
+    }
     private func handleImage(_ data: Data) {
-        recognitionMessage = "Preparing photo…"
+        let startingTitle = title
+        let startingDescription = description
+        photoMessage = "Preparing photo…"
         Task {
             let prepared = await ImageProcessor.preparedData(data)
             imageData = prepared
             do {
                 let result = try await OCRService().recognizeText(in: prepared)
-                if title.isEmpty { title = result.lines.first ?? "" }
-                if description.isEmpty { description = result.text }
-                recognitionMessage = result.text.isEmpty ? "No readable text was found." : "Text recognized from photo. Review the proposal."
-            } catch { recognitionMessage = "Photo saved, but text recognition failed." }
+                if startingTitle.isEmpty, title == startingTitle { title = result.lines.first ?? "" }
+                if startingDescription.isEmpty, description == startingDescription { description = result.text }
+                photoMessage = result.text.isEmpty ? "No readable text was found." : "Text recognized from photo. Review the suggested details."
+            } catch { photoMessage = "Photo saved, but text recognition failed." }
         }
     }
 }
 
 struct EditItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let original: CollectionItem
-    @State private var title: String; @State private var brand: String; @State private var variant: String; @State private var description: String; @State private var quantity: Int; @State private var tags: String; @State private var metadata: [String: MetadataValue]; @State private var state: ItemState; @State private var imageData: Data?; @State private var pickerItem: PhotosPickerItem?; @State private var recognitionMessage: String?; @State private var ratings: [ItemRating]; @State private var comments: [ItemComment]; @State private var commentDraft = ""; @State private var selectedRating: Int
-    init(item: CollectionItem) { original = item; _title = State(initialValue: item.title); _brand = State(initialValue: item.brand); _variant = State(initialValue: item.variant); _description = State(initialValue: item.itemDescription); _quantity = State(initialValue: item.quantity); _tags = State(initialValue: item.tags.joined(separator: ", ")); _metadata = State(initialValue: item.metadata); _state = State(initialValue: item.state); _imageData = State(initialValue: item.imageData); _ratings = State(initialValue: item.ratings); _comments = State(initialValue: item.comments); _selectedRating = State(initialValue: item.ratings.first(where: { $0.participantID == CollaboratorIdentity.current.id })?.value ?? 0) }
+    @State private var title: String; @State private var brand: String; @State private var variant: String; @State private var description: String; @State private var quantity: Int; @State private var tags: String; @State private var metadata: [String: MetadataValue]; @State private var state: ItemState; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var sourceSnapshot: ProductSourceSnapshot?; @State private var pickerItem: PhotosPickerItem?; @State private var recognitionMessage: String?; @State private var sourceMessage: String?; @State private var isLoadingSource = false; @State private var showingMetadataMapping = false; @State private var ratings: [ItemRating]; @State private var comments: [ItemComment]; @State private var commentDraft = ""; @State private var selectedRating: Int
+    init(item: CollectionItem) { original = item; _title = State(initialValue: item.title); _brand = State(initialValue: item.brand); _variant = State(initialValue: item.variant); _description = State(initialValue: item.itemDescription); _quantity = State(initialValue: item.quantity); _tags = State(initialValue: item.tags.joined(separator: ", ")); _metadata = State(initialValue: item.metadata); _state = State(initialValue: item.state); _barcode = State(initialValue: item.barcode); _imageData = State(initialValue: item.imageData); _sourceSnapshot = State(initialValue: item.sourceSnapshot); _ratings = State(initialValue: item.ratings); _comments = State(initialValue: item.comments); _selectedRating = State(initialValue: item.ratings.first(where: { $0.participantID == CollaboratorIdentity.current.id })?.value ?? 0) }
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
             Form {
                 Section("Item details") {
-                    TextField("Title", text: $title); TextField("Brand", text: $brand); TextField("Variant", text: $variant); TextField("Description", text: $description, axis: .vertical)
+                    TextField("Title", text: $title)
+                    if category == .food {
+                        ProductNameLookupControl(query: title, onSelect: applyNameLookupResult)
+                    }
+                    TextField("Brand", text: $brand); TextField("Variant", text: $variant); TextField("Description", text: $description, axis: .vertical)
                     Stepper("Quantity: \(quantity)", value: $quantity, in: 1...999)
                     Picker("Status", selection: $state) { ForEach(store.statuses) { status in Text(status.name).tag(ItemState(rawValue: status.id)) } }
                     TextField("Tags, separated by commas", text: $tags)
@@ -403,14 +702,79 @@ struct EditItemView: View {
                 if let fields = store.selectedCollection?.metadataFields, !fields.isEmpty {
                     CustomMetadataFieldsSection(fields: fields, metadata: $metadata)
                 }
+                if barcode != nil || sourceSnapshot != nil {
+                    Section("Product metadata") {
+                        Button { openMetadataMapping(category: category) } label: {
+                            Label(isLoadingSource ? "Loading product data…" : "Map API fields", systemImage: "arrow.triangle.branch")
+                        }
+                        .disabled(isLoadingSource)
+                        if let snapshot = sourceSnapshot {
+                            Text("\(snapshot.provider) snapshot from \(snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let sourceMessage { Text(sourceMessage).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
                 annotationsSection
                 Section { Button("Delete item", role: .destructive) { dismiss(); Task { await store.deleteItem(original) } } }
             }
             .navigationTitle("Edit item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.imageData = imageData; store.updateItem(item, previousState: previous); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; store.updateItem(item, previousState: previous); dismiss() } }
             }
+            .sheet(isPresented: $showingMetadataMapping) {
+                if let sourceSnapshot { ProductMetadataMappingView(snapshot: sourceSnapshot, metadata: $metadata) }
+            }
+        }
+    }
+
+    private func openMetadataMapping(category: CollectionCategory) {
+        sourceMessage = nil
+        if sourceSnapshot != nil { showingMetadataMapping = true; return }
+        guard category == .food, let barcode else {
+            sourceMessage = "Source refresh is not available for this item provider yet."
+            return
+        }
+        isLoadingSource = true
+        Task {
+            do {
+                guard let product = try await OpenFoodFactsProvider().product(for: barcode), let snapshot = product.sourceSnapshot else {
+                    sourceMessage = "No product source data was found for this barcode."
+                    isLoadingSource = false
+                    return
+                }
+                sourceSnapshot = snapshot
+                isLoadingSource = false
+                showingMetadataMapping = true
+            } catch {
+                sourceMessage = error.localizedDescription
+                isLoadingSource = false
+            }
+        }
+    }
+    private func applyNameLookupResult(_ product: ProductMetadata) {
+        if !product.title.isEmpty { title = product.title }
+        if !product.brand.isEmpty { brand = product.brand }
+        if !product.variant.isEmpty { variant = product.variant }
+        if let productBarcode = product.barcode { barcode = productBarcode }
+        var existingTags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        var tagKeys = Set(existingTags.map { $0.lowercased() })
+        for category in product.categories where tagKeys.insert(category.lowercased()).inserted { existingTags.append(category) }
+        tags = existingTags.joined(separator: ", ")
+        let details = product.extraFields.merging(["country": product.country ?? "", "categories": product.categories.joined(separator: ", ")]) { current, _ in current }
+        for (key, value) in details where !value.isEmpty && (metadata[key]?.displayValue.isEmpty ?? true) { metadata[key] = .string(value) }
+        sourceSnapshot = product.sourceSnapshot
+        sourceMessage = "Product details applied from name lookup."
+        guard imageData == nil, let imageURL = product.imageURL else { return }
+        Task {
+            guard let (data, response) = try? await URLSession.shared.data(from: imageURL),
+                  (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return }
+            let prepared = await ImageProcessor.preparedData(data)
+            guard imageData == nil else { return }
+            imageData = prepared
+            recognitionMessage = "Product image added from the lookup result."
         }
     }
     @ViewBuilder private var annotationsSection: some View {
