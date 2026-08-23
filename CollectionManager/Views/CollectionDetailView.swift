@@ -3,15 +3,17 @@ import UniformTypeIdentifiers
 
 struct CollectionDetailView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("collection.layout.usesTable") private var prefersTableLayout = false
     @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
     @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportTable: CSVImportTable?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
     var body: some View {
         @Bindable var store = store
-        ScrollView { VStack(alignment: .leading, spacing: 20) { header; syncBanner; stats; filterBar; if store.isBulkOperationInProgress { ProgressView("Deleting items…").frame(maxWidth: .infinity).padding() }; if isImporting { ProgressView("Reading import…").frame(maxWidth: .infinity).padding() }; LazyVStack(spacing: 12) { ForEach(store.visibleItems) { ItemCard(item: $0) } } }.padding(.horizontal).padding(.bottom, 24) }
+        Group { if showsTableLayout { tableLayout } else { cardLayout } }
             .refreshable { await store.syncCollections() }
             .background(Color(uiColor: .systemGroupedBackground)).navigationTitle(store.selectedCollection?.name ?? "Collection").navigationBarTitleDisplayMode(.inline).searchable(text: $store.searchText, prompt: "Search items, metadata, tags…")
-            .toolbar { ToolbarItemGroup(placement: .topBarTrailing) { Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); Button { showingEditCollection = true } label: { Label("Edit collection", systemImage: "pencil") }; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
+            .toolbar { ToolbarItemGroup(placement: .topBarTrailing) { if horizontalSizeClass == .regular { layoutPicker }; Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); Button { showingEditCollection = true } label: { Label("Edit collection", systemImage: "pencil") }; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
             .sheet(isPresented: $showingBulkEdit) { BulkEditItemsView(items: store.visibleItems) }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .text], allowsMultipleSelection: false) { result in
@@ -56,6 +58,43 @@ struct CollectionDetailView: View {
                 Text(csvImportError ?? "The file could not be read.")
             }
     }
+    // The spreadsheet layout needs the full width of a regular size class to
+    // be useful, so compact layouts (iPhone, slide over) keep the card list.
+    private var showsTableLayout: Bool { horizontalSizeClass == .regular && prefersTableLayout }
+
+    private var cardLayout: some View {
+        ScrollView { VStack(alignment: .leading, spacing: 20) { header; syncBanner; stats; filterBar; progressBanners; LazyVStack(spacing: 12) { ForEach(store.visibleItems) { ItemCard(item: $0) } } }.padding(.horizontal).padding(.bottom, 24) }
+    }
+
+    private var tableLayout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            syncBanner
+            // The filter bar scrolls horizontally, so it has to be pinned to
+            // its intrinsic height or it competes with the table for space.
+            filterBar.fixedSize(horizontal: false, vertical: true)
+            progressBanners
+            CollectionTableView()
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 16)
+    }
+
+    @ViewBuilder private var progressBanners: some View {
+        if store.isBulkOperationInProgress { ProgressView("Deleting items…").frame(maxWidth: .infinity).padding() }
+        if isImporting { ProgressView("Reading import…").frame(maxWidth: .infinity).padding() }
+    }
+
+    private var layoutPicker: some View {
+        Picker("Layout", selection: $prefersTableLayout) {
+            Label("Cards", systemImage: "square.grid.2x2").tag(false)
+            Label("Table", systemImage: "tablecells").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 120)
+        .help("Switch between the card list and the editable table")
+    }
+
     private var header: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text("Your shared shelf").font(.title2.bold()); Text("Everything you want to remember, together.").foregroundStyle(.secondary) }; Spacer(); Image(systemName: store.selectedCollection?.icon ?? "square.stack").font(.system(size: 32)).foregroundStyle(.pink).padding(14).background(.pink.opacity(0.12), in: .circle) } }
     private var syncBanner: some View { Group { if store.syncState == .syncing { Label("Syncing collaboration changes…", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.secondary) } else if let error = store.syncError { HStack { Button { showingSyncError = true } label: { Label("Sync needs attention", systemImage: "exclamationmark.icloud") }.buttonStyle(.plain); Spacer(); Button("Retry") { Task { await store.syncCollections() } } }.font(.footnote).foregroundStyle(.orange).help(error) } else if store.syncState == .idle { Label("Changes are saved to iCloud", systemImage: "checkmark.icloud").font(.footnote).foregroundStyle(.secondary) } } }
     private var stats: some View { let s = store.stats; return HStack(spacing: 10) { StatTile(value: s.stored, label: "In storage", color: .teal); StatTile(value: s.consumed, label: "Consumed", color: .green); StatTile(value: s.wanted, label: "Want to try", color: .orange) } }
