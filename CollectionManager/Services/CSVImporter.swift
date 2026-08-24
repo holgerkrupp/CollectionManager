@@ -20,6 +20,47 @@ struct CSVImportTable: Identifiable, Sendable {
     var rows: [[String]]
 }
 
+/// The separators a spreadsheet export realistically uses. Detection picks one
+/// automatically, but the import screen lets people override it because a file
+/// full of semicolons inside quoted text can fool any heuristic.
+enum CSVDelimiter: String, CaseIterable, Identifiable, Codable, Sendable {
+    case comma
+    case semicolon
+    case tab
+    case pipe
+
+    var id: String { rawValue }
+
+    var character: Character {
+        switch self {
+        case .comma: ","
+        case .semicolon: ";"
+        case .tab: "\t"
+        case .pipe: "|"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .comma: "Comma  ,"
+        case .semicolon: "Semicolon  ;"
+        case .tab: "Tab"
+        case .pipe: "Pipe  |"
+        }
+    }
+}
+
+/// A CSV file that has been read but not yet interpreted. Keeping the raw text
+/// around lets the import screen re-parse instantly when the delimiter or the
+/// header setting changes, without touching the file again.
+struct CSVParsedFile: Identifiable, Sendable {
+    let id = UUID()
+    var fileName: String
+    var text: String
+    var detectedDelimiter: CSVDelimiter
+    var suggestsHeaderRow: Bool
+}
+
 enum ImportColumnDestination: Hashable, Codable, Sendable {
     case ignore
     case standard(HTMLImportField)
@@ -79,6 +120,66 @@ struct CollectionImporter {
         return CSVImportTable(headers: headers, rows: Array(rows.dropFirst()))
     }
 
+    /// Reads the file without deciding yet how it should be interpreted. The
+    /// import screen makes the header and delimiter choices explicit instead.
+    nonisolated func parseFile(_ data: Data, fileName: String) throws -> CSVParsedFile {
+        guard var text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        if text.first == "\u{feff}" { text.removeFirst() }
+        let delimiter = CSVDelimiter.allCases.first { $0.character == detectedDelimiter(in: text) } ?? .comma
+        let rows = rows(in: text, delimiter: delimiter)
+        return CSVParsedFile(fileName: fileName, text: text, detectedDelimiter: delimiter, suggestsHeaderRow: looksLikeHeaderRow(rows))
+    }
+
+    /// Splits the raw text into rows, dropping only the rows that are entirely
+    /// empty so the row numbers people see match the file as closely as possible.
+    nonisolated func rows(in text: String, delimiter: CSVDelimiter) -> [[String]] {
+        parseRows(text, delimiter: delimiter.character).filter { row in
+            row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+    }
+
+    /// Builds the mappable table. Without a header row the columns are named
+    /// positionally so every column still has something to point at.
+    nonisolated func makeTable(rows: [[String]], firstRowIsHeader: Bool) -> CSVImportTable {
+        let columnCount = rows.map(\.count).max() ?? 0
+        guard columnCount > 0 else { return CSVImportTable(headers: [], rows: []) }
+
+        let headers: [String]
+        let bodyRows: [[String]]
+        if firstRowIsHeader, let rawHeader = rows.first {
+            var headerCounts: [String: Int] = [:]
+            headers = (0..<columnCount).map { index in
+                let trimmed = index < rawHeader.count ? rawHeader[index].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                let base = trimmed.isEmpty ? "Column \(index + 1)" : trimmed
+                headerCounts[base, default: 0] += 1
+                let count = headerCounts[base, default: 1]
+                return count == 1 ? base : "\(base) \(count)"
+            }
+            bodyRows = Array(rows.dropFirst())
+        } else {
+            headers = (0..<columnCount).map { "Column \($0 + 1)" }
+            bodyRows = rows
+        }
+
+        let padded = bodyRows.map { row in
+            row.count == columnCount ? row : row + Array(repeating: "", count: max(0, columnCount - row.count))
+        }
+        return CSVImportTable(headers: headers, rows: padded)
+    }
+
+    /// A header row usually consists of short, filled-in labels that do not look
+    /// like the data underneath it, so numbers, dates and booleans argue against it.
+    nonisolated func looksLikeHeaderRow(_ rows: [[String]]) -> Bool {
+        guard let first = rows.first, rows.count > 1 else { return false }
+        let values = first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !values.isEmpty else { return false }
+        return values.allSatisfy { value in
+            parseNumber(value) == nil && parseBoolean(value) == nil && MetadataDateParser.parse(value, hint: "") == nil
+        }
+    }
+
     // Kept for callers that only need automatic built-in mapping.
     nonisolated func parseCSV(_ data: Data) throws -> [ImportDraft] {
         let table = try parseTable(data)
@@ -86,23 +187,41 @@ struct CollectionImporter {
         return prepareImport(from: table, mapping: mapping, existingMetadataFields: []).drafts
     }
 
-    nonisolated func suggestMapping(for table: CSVImportTable, existingMetadataFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {
-        table.headers.enumerated().map { index, header in
+    nonisolated func suggestMapping(for table: CSVImportTable, existingMetadataFields: [MetadataFieldDefinition], ensuresTitleColumn: Bool = false) -> [ImportColumnDestination] {
+        var mapping: [ImportColumnDestination] = table.headers.enumerated().map { index, header in
             if let standard = suggestedStandardField(for: header) { return .standard(standard) }
             if let existing = existingMetadataFields.first(where: { normalizedName($0.name) == normalizedName(header) }) {
                 return .existingMetadata(existing.id)
             }
             let values = table.rows.compactMap { index < $0.count ? $0[index] : nil }
-            return .newMetadata(inferredType(header: header, values: values))
+            return ImportColumnDestination.newMetadata(inferredType(header: header, values: values))
         }
+        // An import without a title cannot produce items at all, so when no
+        // column names itself the title, the first mostly-filled text column is
+        // proposed. It stays a suggestion the user can move elsewhere.
+        if ensuresTitleColumn, !mapping.contains(.standard(.title)) {
+            let candidate = table.headers.indices.first { index in
+                let values = table.rows.compactMap { index < $0.count ? $0[index].trimmingCharacters(in: .whitespacesAndNewlines) : nil }
+                let populated = values.filter { !$0.isEmpty }
+                guard !populated.isEmpty, populated.count * 2 >= values.count else { return false }
+                return populated.contains { parseNumber($0) == nil && parseBoolean($0) == nil }
+            }
+            if let candidate { mapping[candidate] = .standard(.title) }
+        }
+        return mapping
     }
 
-    nonisolated func prepareImport(from table: CSVImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition], sourceIdentifierColumn: Int? = nil, conditionalRules: [ConditionalMappingRule] = [], validStatusIDs: Set<String>? = nil) -> ImportPreparation {
+    /// - Parameter titleColumns: Columns whose values are joined into the title,
+    ///   in the given order. A column listed here still lands in whatever field
+    ///   `mapping` assigns it, so a color can be part of the name and remain its
+    ///   own field. When empty, the columns mapped to `.title` are used.
+    nonisolated func prepareImport(from table: CSVImportTable, mapping: [ImportColumnDestination], existingMetadataFields: [MetadataFieldDefinition], sourceIdentifierColumn: Int? = nil, conditionalRules: [ConditionalMappingRule] = [], validStatusIDs: Set<String>? = nil, newFieldNames: [Int: String] = [:], titleColumns: [Int] = []) -> ImportPreparation {
         var usedNames = Set(existingMetadataFields.map { normalizedName($0.name) })
         var newFieldsByColumn: [Int: MetadataFieldDefinition] = [:]
         for (index, destination) in mapping.enumerated() {
             guard case .newMetadata(let type) = destination, index < table.headers.count else { continue }
-            let baseName = displayName(for: table.headers[index])
+            let customName = newFieldNames[index]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseName = customName.flatMap { $0.isEmpty ? nil : $0 } ?? displayName(for: table.headers[index])
             var name = baseName
             var suffix = 2
             while usedNames.contains(normalizedName(name)) {
@@ -119,12 +238,17 @@ struct CollectionImporter {
                 guard index < row.count else { return "" }
                 return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            // Several columns may feed the same field — a title assembled from
+            // model, generation and color is what makes rows of a product matrix
+            // distinguishable — so every column mapped to a field is joined.
             func value(_ field: HTMLImportField) -> String {
-                guard let index = mapping.firstIndex(of: .standard(field)) else { return "" }
-                return rawValue(at: index)
+                let parts = mapping.indices.filter { mapping[$0] == .standard(field) }.map(rawValue(at:)).filter { !$0.isEmpty }
+                let separator = field == .description ? " · " : " "
+                return parts.joined(separator: separator)
             }
 
-            let title = value(.title)
+            let titleIndices = titleColumns.isEmpty ? mapping.indices.filter { mapping[$0] == .standard(.title) } : titleColumns
+            let title = titleIndices.map(rawValue(at:)).filter { !$0.isEmpty }.joined(separator: " ")
             guard !title.isEmpty else { return nil }
             let rawState = value(.state).lowercased()
             let state = ItemState(rawValue: rawState.isEmpty ? "wanted" : rawState.contains("storage") || rawState.contains("lager") ? "stored" : rawState.contains("consum") || rawState.contains("getrun") ? "consumed" : rawState)
@@ -285,7 +409,7 @@ struct CollectionImporter {
         while index < text.endIndex {
             let character = text[index]
             if character == "\"" { isQuoted.toggle() }
-            if !isQuoted, character == "\n" || character == "\r" { break }
+            if !isQuoted, character.isNewline { break }
             if !isQuoted, counts[character] != nil { counts[character, default: 0] += 1 }
             index = text.index(after: index)
         }
@@ -321,12 +445,11 @@ struct CollectionImporter {
                 }
             } else if character == delimiter && !isQuoted {
                 finishField()
-            } else if (character == "\n" || character == "\r") && !isQuoted {
+            } else if character.isNewline && !isQuoted {
+                // Swift stores a CRLF pair as one Character, so testing for
+                // "\n" alone would miss every line break in a Windows or
+                // spreadsheet export and collapse the file into a single row.
                 finishRow()
-                if character == "\r" {
-                    let next = text.index(after: index)
-                    if next < text.endIndex && text[next] == "\n" { index = next }
-                }
             } else {
                 field.append(character)
             }

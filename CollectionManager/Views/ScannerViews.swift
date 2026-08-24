@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 import VisionKit
 import Vision
@@ -110,3 +111,4 @@ struct PhotoCaptureView: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { dismiss() }
     }
 }
+#endif

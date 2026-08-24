@@ -39,9 +39,11 @@ actor CollectionBackgroundRepository {
 
     func deleteItem(id itemID: UUID, collectionID: UUID) -> Bool {
         let context = ModelContext(container)
-        guard canEdit(collectionID, context: context),
-              let item = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first,
-              item.stateRawValue != "consumed" else { return false }
+        guard canEdit(collectionID, context: context) else { return false }
+        // An item that is already gone from the store is a successful delete,
+        // not a failure. Reporting false here made a repeated delete look
+        // broken and put the row back into the list.
+        guard let item = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return true }
         let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
         let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
         let events = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
@@ -226,12 +228,14 @@ actor CollectionBackgroundRepository {
         save()
     }
     @discardableResult
-    func addItem(_ item: CollectionItem) -> Bool {
+    func addItem(_ item: CollectionItem, allowsDuplicates: Bool = false) -> Bool {
         guard role(for: item.collectionID).canEdit else { return false }
         let collectionID = item.collectionID
-        let identity = importIdentity(title: item.title, brand: item.brand, variant: item.variant)
-        let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
-        guard !records.contains(where: { importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity }) else { return false }
+        if !allowsDuplicates {
+            let identity = importIdentity(title: item.title, brand: item.brand, variant: item.variant)
+            let records = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
+            guard !records.contains(where: { importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity }) else { return false }
+        }
         var item = item
         item.tags = TagUtilities.applyingMergedTags(item.tags, rules: mergedTags(for: item.collectionID))
         context.insert(ItemRecord(from: item))
@@ -508,7 +512,7 @@ actor CollectionBackgroundRepository {
         save()
         return record.domain
     }
-    func deleteItem(_ item: CollectionItem) { guard role(for: item.collectionID).canEdit, item.state != .consumed else { return }; let itemID = item.id; guard let record = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return }; let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []; let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []; ratings.forEach { context.delete($0); enqueue(collectionID: item.collectionID, itemID: item.id, recordName: CollaborationRecordNames.rating(itemID: item.id, participantID: $0.participantID), recordType: "CollectionItemRating", operation: "delete") }; comments.forEach { context.delete($0); enqueue(collectionID: item.collectionID, itemID: item.id, recordName: CollaborationRecordNames.comment($0.id), recordType: "CollectionItemComment", operation: "delete") }; context.delete(record); enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem", operation: "delete"); save() }
+    func deleteItem(_ item: CollectionItem) { guard role(for: item.collectionID).canEdit else { return }; let itemID = item.id; guard let record = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return }; let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []; let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []; ratings.forEach { context.delete($0); enqueue(collectionID: item.collectionID, itemID: item.id, recordName: CollaborationRecordNames.rating(itemID: item.id, participantID: $0.participantID), recordType: "CollectionItemRating", operation: "delete") }; comments.forEach { context.delete($0); enqueue(collectionID: item.collectionID, itemID: item.id, recordName: CollaborationRecordNames.comment($0.id), recordType: "CollectionItemComment", operation: "delete") }; context.delete(record); enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem", operation: "delete"); save() }
     func deleteAllItems(in collectionID: UUID) -> Int {
         let items = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
         let events = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
@@ -536,6 +540,19 @@ actor CollectionBackgroundRepository {
     @discardableResult
     func merge(_ snapshots: [CloudCollectionSnapshot]) -> CloudMergeNotificationChanges {
         var notificationChanges = CloudMergeNotificationChanges()
+        // A snapshot is fetched from CloudKit, so it still contains everything
+        // that has been deleted locally but not pushed yet — either because the
+        // sync that fetched it started before the delete, or because the push
+        // has not run. Without these tombstones the merge re-inserts every one
+        // of those records and the deletion appears to undo itself a second
+        // later. The outbox is authoritative until the push clears it.
+        let outbox = pendingMutations()
+        let deletedItemIDs = Set(outbox
+            .filter { $0.recordType == "CollectionItem" && $0.operation == "delete" }
+            .compactMap { $0.itemID ?? UUID(uuidString: $0.recordName) })
+        let deletedCollectionIDs = Set(outbox
+            .filter { $0.recordType == "Collection" && $0.operation == "delete" }
+            .map(\.collectionID))
         var sharedSnapshotsByCollection: [UUID: CloudCollectionSnapshot] = [:]
         for snapshot in snapshots where snapshot.collection.role != .owner {
             sharedSnapshotsByCollection[snapshot.collection.id] = snapshot
@@ -549,7 +566,7 @@ actor CollectionBackgroundRepository {
                 privateItemsToRecover[item.id] = snapshot.collection.id
             }
         }
-        for snapshot in snapshots {
+        for snapshot in snapshots where !deletedCollectionIDs.contains(snapshot.collection.id) {
             let collectionID = snapshot.collection.id
             let isShadowedPrivateSnapshot = snapshot.collection.role == .owner && sharedSnapshotsByCollection[collectionID] != nil
             let existingCollection = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first
@@ -606,7 +623,7 @@ actor CollectionBackgroundRepository {
             }
             let existingItems = (try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             var itemsByID = Dictionary(uniqueKeysWithValues: existingItems.map { ($0.id, $0) })
-            for item in snapshot.items {
+            for item in snapshot.items where !deletedItemIDs.contains(item.id) {
                 if let record = itemsByID[item.id] {
                     if item.updatedAt > record.updatedAt { record.update(from: item) }
                 } else {
@@ -621,19 +638,23 @@ actor CollectionBackgroundRepository {
             for itemID in snapshot.deletedItemIDs {
                 guard let record = itemsByID[itemID] else { continue }
                 notificationChanges.sharedItemChanges.append(SharedCollectionItemChange(collectionID: collectionID, collectionName: snapshot.collection.name, itemTitle: record.title, kind: .removed))
-                let ratings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
-                let comments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
-                let events = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []
-                ratings.forEach(context.delete)
-                comments.forEach(context.delete)
-                events.forEach(context.delete)
+                purgeItemChildren(itemID: itemID)
+                context.delete(record)
+                itemsByID[itemID] = nil
+            }
+            // A pending local delete may still have a record here when the
+            // snapshot arrived first. Removing it silently keeps the list in
+            // step with the outbox without claiming a collaborator did it.
+            for itemID in deletedItemIDs {
+                guard let record = itemsByID[itemID] else { continue }
+                purgeItemChildren(itemID: itemID)
                 context.delete(record)
                 itemsByID[itemID] = nil
             }
             let existingRatings = (try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             let snapshotRatingKeys = Set(snapshot.ratings.map { "\($0.itemID.uuidString)|\($0.participantID)" })
             for rating in existingRatings where !snapshotRatingKeys.contains("\(rating.itemID.uuidString)|\(rating.participantID)") { context.delete(rating) }
-            for rating in snapshot.ratings {
+            for rating in snapshot.ratings where !deletedItemIDs.contains(rating.itemID) {
                 let existing = existingRatings.first(where: { $0.itemID == rating.itemID && $0.participantID == rating.participantID })
                 if let existing {
                     if rating.updatedAt > existing.updatedAt { existing.value = rating.value; existing.participantName = rating.participantName; existing.updatedAt = rating.updatedAt }
@@ -642,14 +663,14 @@ actor CollectionBackgroundRepository {
             let existingComments = (try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             let snapshotCommentIDs = Set(snapshot.comments.map(\.id))
             for comment in existingComments where !snapshotCommentIDs.contains(comment.id) { context.delete(comment) }
-            for comment in snapshot.comments {
+            for comment in snapshot.comments where !deletedItemIDs.contains(comment.itemID) {
                 if let existing = existingComments.first(where: { $0.id == comment.id }) {
                     if comment.updatedAt > existing.updatedAt { existing.text = comment.text; existing.participantName = comment.participantName; existing.updatedAt = comment.updatedAt }
                 } else { context.insert(ItemCommentRecord(id: comment.id, itemID: comment.itemID, collectionID: collectionID, participantID: comment.participantID, participantName: comment.participantName, text: comment.text, createdAt: comment.createdAt, updatedAt: comment.updatedAt)) }
             }
             let existingEvents = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == collectionID }))) ?? []
             let existingIDs = Set(existingEvents.map(\.id))
-            for event in snapshot.events where !existingIDs.contains(event.id) {
+            for event in snapshot.events where !existingIDs.contains(event.id) && !deletedItemIDs.contains(event.itemID) {
                 let record = EventRecord(itemID: event.itemID, collectionID: collectionID, type: event.type, note: event.note)
                 record.id = event.id; record.timestamp = event.timestamp
                 context.insert(record)
@@ -658,7 +679,7 @@ actor CollectionBackgroundRepository {
         let existingPendingItemSaves = Set(pendingMutations()
             .filter { $0.recordType == "CollectionItem" && $0.operation != "delete" }
             .map(\.recordName))
-        for (itemID, collectionID) in privateItemsToRecover where !existingPendingItemSaves.contains(itemID.uuidString) {
+        for (itemID, collectionID) in privateItemsToRecover where !existingPendingItemSaves.contains(itemID.uuidString) && !deletedItemIDs.contains(itemID) {
             // Preserve items/edits that the old routing bug successfully saved
             // only to the participant's private duplicate. The next sync now
             // sees an editor role and sends these mutations to the shared zone.
@@ -666,6 +687,12 @@ actor CollectionBackgroundRepository {
         }
         save()
         return notificationChanges
+    }
+    private func purgeItemChildren(itemID: UUID) {
+        let id = itemID
+        ((try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == id }))) ?? []).forEach(context.delete)
+        ((try? context.fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == id }))) ?? []).forEach(context.delete)
+        ((try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == id }))) ?? []).forEach(context.delete)
     }
     private func enqueue(collectionID: UUID, itemID: UUID? = nil, recordName: String, recordType: String, operation: String = "save") { context.insert(SyncMutationRecord(collectionID: collectionID, itemID: itemID, recordName: recordName, recordType: recordType, operation: operation)) }
     private func hasCollectionMembership(_ collectionID: UUID) -> Bool { let id = collectionID; return ((try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id }))) ?? []).isEmpty == false }

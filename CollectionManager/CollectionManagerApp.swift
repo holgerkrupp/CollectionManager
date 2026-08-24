@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import CloudKit
+#if os(iOS)
 import UIKit
 
 final class CloudShareAppDelegate: NSObject, UIApplicationDelegate {
@@ -30,6 +31,15 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
         CloudShareInvitationInbox.shared.receive(metadata)
     }
 }
+#elseif os(macOS)
+import AppKit
+
+final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
+        CloudShareInvitationInbox.shared.receive(metadata)
+    }
+}
+#endif
 
 @MainActor final class CloudShareInvitationInbox {
     static let shared = CloudShareInvitationInbox()
@@ -61,7 +71,11 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
 }
 
 @main struct CollectionManagerApp: App {
+    #if os(iOS)
     @UIApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
+    #elseif os(macOS)
+    @NSApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
+    #endif
     @Environment(\.scenePhase) private var scenePhase
     let container: ModelContainer
     @State private var store = AppStore()
@@ -121,5 +135,22 @@ final class CloudShareSceneDelegate: NSObject, UIWindowSceneDelegate {
                 .onOpenURL { url in Task { await store.acceptShare(from: url) } }
         }
         .modelContainer(container)
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(store)
+        }
+
+        // Collection settings get a real, resizable window rather than a sheet:
+        // the statuses and metadata editors need room, and keying the group by
+        // collection lets several collections be configured side by side.
+        WindowGroup(id: CollectionSettingsWindow.id, for: UUID.self) { $collectionID in
+            CollectionSettingsWindowView(collectionID: collectionID)
+                .environment(store)
+        }
+        .modelContainer(container)
+        .defaultSize(width: 940, height: 600)
+        .windowResizability(.contentMinSize)
+        #endif
     }
 }

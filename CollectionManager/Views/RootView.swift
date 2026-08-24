@@ -1,10 +1,18 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
     @State private var showingNewCollection = false
+    #if os(iOS)
     @State private var showingSettings = false
+    #endif
     @State private var showingOnboarding = false
     @State private var selectedCollectionID: UUID?
     @State private var collectionPendingDeletion: CollectionModel?
@@ -12,12 +20,23 @@ struct RootView: View {
         NavigationSplitView {
             List(selection: $selectedCollectionID) {
                 Section("Your collections") { ForEach(store.collections) { collection in CollectionRow(collection: collection).tag(collection.id).swipeActions(edge: .trailing, allowsFullSwipe: false) { if collection.role.canDelete { Button(role: .destructive) { collectionPendingDeletion = collection } label: { Label("Delete", systemImage: "trash") } } } } }
-                Section { Button { showingSettings = true } label: { Label("Settings", systemImage: "gearshape") } }
-            }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showingNewCollection = true } label: { Image(systemName: "plus") } } }
+                Section {
+                    #if os(macOS)
+                    Button {
+                        NSApp.activate(ignoringOtherApps: true)
+                        openSettings()
+                    } label: { Label("Settings", systemImage: "gearshape") }
+                    #else
+                    Button { showingSettings = true } label: { Label("Settings", systemImage: "gearshape") }
+                    #endif
+                }
+            }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .platformTrailing) { Button { showingNewCollection = true } label: { Image(systemName: "plus") } } }
         } detail: { if store.selectedCollection != nil { CollectionDetailView() } else { ContentUnavailableView("No collections yet", systemImage: "square.stack.3d.up", description: Text("Create your first collection to get started.")) } }
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
+        #if os(iOS)
         .sheet(isPresented: $showingSettings) { SettingsView() }
-        .fullScreenCover(isPresented: $showingOnboarding) {
+        #endif
+        .platformFullScreenCover(isPresented: $showingOnboarding) {
             OnboardingView {
                 onboardingCompleted = true
                 showingOnboarding = false

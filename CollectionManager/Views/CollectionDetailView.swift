@@ -4,16 +4,23 @@ import UniformTypeIdentifiers
 struct CollectionDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @AppStorage("collection.layout.usesTable") private var prefersTableLayout = false
     @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
-    @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportTable: CSVImportTable?; @State private var csvImportError: String?; @State private var isImporting = false
+    @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportFile: CSVParsedFile?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
     var body: some View {
         @Bindable var store = store
         Group { if showsTableLayout { tableLayout } else { cardLayout } }
             .refreshable { await store.syncCollections() }
-            .background(Color(uiColor: .systemGroupedBackground)).navigationTitle(store.selectedCollection?.name ?? "Collection").navigationBarTitleDisplayMode(.inline).searchable(text: $store.searchText, prompt: "Search items, metadata, tags…")
-            .toolbar { ToolbarItemGroup(placement: .topBarTrailing) { if horizontalSizeClass == .regular { layoutPicker }; Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); Button { showingEditCollection = true } label: { Label("Edit collection", systemImage: "pencil") }; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
+            .background(Color.platformGroupedBackground).navigationTitle(store.selectedCollection?.name ?? "Collection")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .searchable(text: $store.searchText, prompt: "Search items, metadata, tags…")
+            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if horizontalSizeClass == .regular { layoutPicker }; Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); editCollectionMenuItem; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
             .sheet(isPresented: $showingBulkEdit) { BulkEditItemsView(items: store.visibleItems) }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .text], allowsMultipleSelection: false) { result in
@@ -21,30 +28,39 @@ struct CollectionDetailView: View {
                 isImporting = true
                 Task {
                     let parsed = await Task.detached(priority: .userInitiated) {
-                        guard url.startAccessingSecurityScopedResource() else { return (table: CSVImportTable?.none, error: String?.some("The selected file could not be accessed.")) }
+                        guard url.startAccessingSecurityScopedResource() else { return (file: CSVParsedFile?.none, error: String?.some("The selected file could not be accessed.")) }
                         defer { url.stopAccessingSecurityScopedResource() }
                         do {
-                            let table = try CollectionImporter().parseTable(Data(contentsOf: url))
-                            guard !table.headers.isEmpty else { return (table: CSVImportTable?.none, error: String?.some("The CSV file does not contain a header row.")) }
-                            return (table: CSVImportTable?.some(table), error: String?.none)
+                            let file = try CollectionImporter().parseFile(Data(contentsOf: url), fileName: url.lastPathComponent)
+                            guard !CollectionImporter().rows(in: file.text, delimiter: file.detectedDelimiter).isEmpty else {
+                                return (file: CSVParsedFile?.none, error: String?.some("The CSV file does not contain any rows."))
+                            }
+                            return (file: CSVParsedFile?.some(file), error: String?.none)
                         } catch {
-                            return (table: CSVImportTable?.none, error: String?.some(error.localizedDescription))
+                            return (file: CSVParsedFile?.none, error: String?.some(error.localizedDescription))
                         }
                     }.value
                     isImporting = false
-                    csvImportTable = parsed.table
+                    csvImportFile = parsed.file
                     csvImportError = parsed.error
                 }
             }
-            .sheet(item: $csvImportTable) { table in CSVMappingView(table: table) }
+            .sheet(item: $csvImportFile) { file in CSVImportView(file: file) }
             .sheet(isPresented: $showingHTMLImporter) { HTMLImportView() }
             .sheet(isPresented: $showingWebSync) { WebSyncListView() }
             .sheet(isPresented: $showingTagManager) { if let collection = store.selectedCollection { TagManagementView(collection: collection) } }
+            #if os(iOS)
             .sheet(isPresented: $showingEditCollection) { if let collection = store.selectedCollection { EditCollectionView(collection: collection) } }
+            #endif
             .sheet(isPresented: $showingSharing) { if let collection = store.selectedCollection { CloudSharingView(collection: collection) } }
             .confirmationDialog("Delete all items in this collection? This cannot be undone.", isPresented: $showingDeleteAllConfirmation, titleVisibility: .visible) {
                 Button("Delete All Items", role: .destructive) { Task { _ = await store.deleteAllItems() } }
                 Button("Cancel", role: .cancel) {}
+            }
+            .alert("Delete failed", isPresented: Binding(get: { store.itemActionError != nil }, set: { if !$0 { store.itemActionError = nil } })) {
+                Button("OK") { store.itemActionError = nil }
+            } message: {
+                Text(store.itemActionError ?? "")
             }
             .alert("iCloud sync error", isPresented: $showingSyncError) {
                 Button("Retry") { Task { await store.syncCollections() } }
@@ -58,6 +74,19 @@ struct CollectionDetailView: View {
                 Text(csvImportError ?? "The file could not be read.")
             }
     }
+    /// macOS folds the name, icon, and category fields into the General pane of
+    /// the settings window, so there is one entry point instead of a sheet that
+    /// links onward to a second editor.
+    @ViewBuilder private var editCollectionMenuItem: some View {
+        #if os(macOS)
+        if let collection = store.selectedCollection {
+            Button { openWindow(id: CollectionSettingsWindow.id, value: collection.id) } label: { Label("Collection settings…", systemImage: "slider.horizontal.3") }
+        }
+        #else
+        Button { showingEditCollection = true } label: { Label("Edit collection", systemImage: "pencil") }
+        #endif
+    }
+
     // The spreadsheet layout needs the full width of a regular size class to
     // be useful, so compact layouts (iPhone, slide over) keep the card list.
     private var showsTableLayout: Bool { horizontalSizeClass == .regular && prefersTableLayout }

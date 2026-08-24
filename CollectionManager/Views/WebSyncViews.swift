@@ -23,8 +23,8 @@ struct WebSyncListView: View {
             }
             .navigationTitle("Web sync")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .platformLeading) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .platformTrailing) {
                     Button {
                         editingSync = nil
                         showingEditor = true
@@ -125,7 +125,10 @@ struct WebSyncEditorView: View {
         NavigationStack {
             Form {
                 Section("Source") {
-                    TextField("https://…", text: $urlString).textInputAutocapitalization(.never).keyboardType(.URL)
+                    TextField("https://…", text: $urlString)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never).keyboardType(.URL)
+                        #endif
                     Button { load() } label: { Label(isLoading ? "Reading…" : "Read and detect objects", systemImage: "globe") }.disabled(isLoading)
                 }
                 if !tables.isEmpty {

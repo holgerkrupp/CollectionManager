@@ -1,0 +1,23 @@
+{
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/CSVImporter.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CSVImporter.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CSVImporter.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CSVImporter.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CSVImporter.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CSVImporter.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/CloudKitSharingService.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CloudKitSharingService.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CloudKitSharingService.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CloudKitSharingService.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CloudKitSharingService.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/CloudKitSharingService.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/HTMLImporter.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/HTMLImporter.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/HTMLImporter.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/HTMLImporter.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/HTMLImporter.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/HTMLImporter.swiftdeps"
+  }
+}

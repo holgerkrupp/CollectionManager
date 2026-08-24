@@ -1,0 +1,23 @@
+{
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/WebSyncScheduler.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Store/AppStore.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CloudSharingView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.swiftdeps"
+  }
+}

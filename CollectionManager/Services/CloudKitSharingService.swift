@@ -1,5 +1,7 @@
 import CloudKit
+#if os(iOS)
 import UIKit
+#endif
 
 enum SharingError: LocalizedError {
     case unavailable
@@ -153,13 +155,19 @@ final class CloudKitSharingService {
         return cloudError.code == .serverRecordChanged || cloudError.code == .constraintViolation || isBatchFailure(error)
     }
 
+    #if os(iOS)
     func controller(for share: CKShare) -> UICloudSharingController {
         let controller = UICloudSharingController(share: share, container: container)
         controller.availablePermissions = [.allowPrivate, .allowReadWrite]
         return controller
     }
+    #endif
 
-    func sync(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws -> [CloudCollectionSnapshot] {
+    /// Pushes the outbox and returns the fetched snapshots together with the
+    /// mutations that were actually written. A caller must only clear the
+    /// mutations reported here: dropping a skipped delete leaves the record in
+    /// CloudKit, and the next snapshot merge restores it locally.
+    func sync(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws -> (snapshots: [CloudCollectionSnapshot], appliedMutationIDs: Set<UUID>) {
         guard Self.isAvailable else { throw SharingError.unavailable }
         let needsImageBootstrap = !UserDefaults.standard.bool(forKey: Self.imageBootstrapKey)
         var cloudItems = await preparedItemsForCloud(items)
@@ -169,13 +177,13 @@ final class CloudKitSharingService {
                 cloudItems[index].updatedAt = migrationDate
             }
         }
-        try await push(collections: collections, items: cloudItems, events: events, mutations: mutations)
+        let appliedMutationIDs = try await push(collections: collections, items: cloudItems, events: events, mutations: mutations)
         async let privateSnapshots = fetchSnapshots(from: container.privateCloudDatabase)
         async let sharedSnapshots = fetchSnapshots(from: container.sharedCloudDatabase)
         let snapshots = try await privateSnapshots + sharedSnapshots
         UserDefaults.standard.set(true, forKey: Self.bootstrapKey)
         UserDefaults.standard.set(true, forKey: Self.imageBootstrapKey)
-        return snapshots
+        return (snapshots, appliedMutationIDs)
     }
 
     func acceptShare(from url: URL) async throws {
@@ -227,14 +235,16 @@ final class CloudKitSharingService {
         throw SharingError.invitationNotReady
     }
 
-    private func push(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws {
+    @discardableResult
+    private func push(collections: [CollectionModel], items: [CollectionItem], events: [ItemEvent], mutations: [CloudSyncMutation]) async throws -> Set<UUID> {
         // Local mutations are the outbox. Re-uploading every item and event on
         // every launch is slow and creates avoidable CloudKit conflicts. Keep a
         // one-time bootstrap for data created by older app versions that had no
         // outbox records yet.
         let needsBootstrap = !UserDefaults.standard.bool(forKey: Self.bootstrapKey)
         let needsImageBootstrap = !UserDefaults.standard.bool(forKey: Self.imageBootstrapKey)
-        guard needsBootstrap || needsImageBootstrap || !mutations.isEmpty else { return }
+        guard needsBootstrap || needsImageBootstrap || !mutations.isEmpty else { return [] }
+        var applied: Set<UUID> = []
         let sharedZones = (try? await container.sharedCloudDatabase.allRecordZones()) ?? []
         let sharedZonesByName = Dictionary(uniqueKeysWithValues: sharedZones.map { ($0.zoneID.zoneName, $0.zoneID) })
         let localCollectionIDs = Set(collections.map(\.id))
@@ -247,7 +257,13 @@ final class CloudKitSharingService {
                 // Already gone is the desired state.
             }
         }
+        let localCollectionIDsForMutations = Set(collections.map(\.id))
+        // Nothing is left to write for a collection that no longer exists
+        // locally — its zone was just deleted, or it was never ours. Those
+        // mutations are complete rather than pending.
+        applied.formUnion(mutations.filter { !localCollectionIDsForMutations.contains($0.collectionID) }.map(\.id))
         for collection in collections {
+            let collectionMutationIDs = Set(mutations.filter { $0.collectionID == collection.id }.map(\.id))
             let collectionMutations = mutations.filter { $0.collectionID == collection.id && $0.recordType == "Collection" }
             let itemMutations = mutations.filter { $0.collectionID == collection.id && $0.recordType == "CollectionItem" && $0.operation != "delete" }
             let ratingMutations = mutations.filter { $0.collectionID == collection.id && $0.recordType == "CollectionItemRating" }
@@ -261,13 +277,21 @@ final class CloudKitSharingService {
                 database = container.privateCloudDatabase
                 zone = zoneID(for: collection.id)
             } else {
-                guard let sharedZone = sharedZonesByName["collection-\(collection.id.uuidString)"] else { continue }
+                guard let sharedZone = sharedZonesByName["collection-\(collection.id.uuidString)"] else {
+                    // The shared zone is gone, so there is nowhere left to
+                    // write these changes to.
+                    applied.formUnion(collectionMutationIDs)
+                    continue
+                }
                 database = container.sharedCloudDatabase
                 zone = sharedZone
             }
             let shouldSaveCollection = isOwner && (needsBootstrap || collectionMutations.contains { $0.operation != "delete" })
             let shouldBootstrap = isOwner && needsBootstrap
-            guard shouldSaveCollection || hasImagesToBootstrap || !itemMutations.isEmpty || !ratingMutations.isEmpty || !commentMutations.isEmpty || !deleteMutations.isEmpty else { continue }
+            guard shouldSaveCollection || hasImagesToBootstrap || !itemMutations.isEmpty || !ratingMutations.isEmpty || !commentMutations.isEmpty || !deleteMutations.isEmpty else {
+                applied.formUnion(collectionMutationIDs)
+                continue
+            }
             if isOwner { do { _ = try await database.save(CKRecordZone(zoneID: zone)) } catch let error as CKError where error.code == .serverRejectedRequest { } }
             let rootID = CKRecord.ID(recordName: collection.id.uuidString, zoneID: zone)
             var saving: [CKRecord] = []
@@ -311,7 +335,11 @@ final class CloudKitSharingService {
             for batch in deleting.chunked(maxCount: 300) {
                 try await deleteRecordsResiliently(batch, in: database)
             }
+            // Only reached when every write for this collection succeeded; a
+            // throw above leaves its mutations pending for the next sync.
+            applied.formUnion(collectionMutationIDs)
         }
+        return applied
     }
 
     private func saveRecordsResiliently(_ records: [CKRecord], in database: CKDatabase) async throws {

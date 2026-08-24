@@ -1,0 +1,309 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManager-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManager-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManager-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManager-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManager-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/CollectionManagerApp.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionManagerApp~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Domain/Models.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Models~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Domain/PlatformCompat.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/PlatformCompat~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Persistence/SwiftDataModels.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SwiftDataModels~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/CSVImporter.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImporter~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/CloudKitSharingService.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudKitSharingService~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/HTMLImporter.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImporter~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/HTMLSyncCoordinator.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLSyncCoordinator~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/LocalNotificationService.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/LocalNotificationService~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/MetadataDateParser.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/MetadataDateParser~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/RecognitionServices.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/Repositories.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/TagUtilities.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/WebSyncScheduler.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncScheduler~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Store/AppStore.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/AppStore~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CSVImportView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CSVImportView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CloudSharingView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CloudSharingView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CollectionDetailView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionDetailView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CollectionSettingsWindow.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionSettingsWindow~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/CollectionTableView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/CollectionTableView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/HTMLImportView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/HTMLImportView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/ImportReviewView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ImportReviewView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/ItemViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ItemViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/OnboardingView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/OnboardingView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/RootView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RootView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/ScannerViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/ScannerViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/SettingsViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/SettingsViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/TagManagementView.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagManagementView~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Views/WebSyncViews.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/WebSyncViews~partial.swiftmodule"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/GeneratedAssetSymbols~partial.swiftmodule"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Domain/Models.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/Models.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/Models.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/Models.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/Models.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/Models.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Domain/PlatformCompat.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/PlatformCompat.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/PlatformCompat.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/PlatformCompat.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/PlatformCompat.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/PlatformCompat.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Persistence/SwiftDataModels.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/SwiftDataModels.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/SwiftDataModels.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/SwiftDataModels.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/SwiftDataModels.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/arm64/SwiftDataModels.swiftdeps"
+  }
+}

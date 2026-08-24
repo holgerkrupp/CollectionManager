@@ -27,7 +27,12 @@ enum MetadataColorCodec {
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
-        guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return "#007AFF" }
+        #if os(iOS)
+        guard PlatformColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return "#007AFF" }
+        #elseif os(macOS)
+        guard let rgbColor = PlatformColor(color).usingColorSpace(.deviceRGB) else { return "#007AFF" }
+        rgbColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        #endif
         return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
     }
 }
@@ -59,9 +64,7 @@ struct ItemCard: View {
         .onTapGesture { showingEdit = true }
         .contextMenu {
             Button { showingEdit = true } label: { Label("Edit", systemImage: "pencil") }
-            if item.state != .consumed {
-                Button(role: .destructive) { Task { await store.deleteItem(item) } } label: { Label("Delete", systemImage: "trash") }
-            }
+            Button(role: .destructive) { Task { await store.deleteItem(item) } } label: { Label("Delete", systemImage: "trash") }
         }
         .sheet(isPresented: $showingEdit) { EditItemView(item: item) }
     }
@@ -111,12 +114,12 @@ private struct ItemMetadataSummary: View {
 private struct ItemThumbnail: View {
     let item: CollectionItem
     let tint: Color
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(platformImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: item.imageSystemName).font(.title2).foregroundStyle(tint)
                     .background(tint.opacity(0.12))
@@ -126,7 +129,7 @@ private struct ItemThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .task(id: item.imageData) {
             guard let data = item.imageData else { image = nil; return }
-            image = await Task.detached(priority: .utility) { UIImage(data: data) }.value
+            image = await Task.detached(priority: .utility) { PlatformImage(data: data) }.value
         }
     }
 }
@@ -338,7 +341,9 @@ private struct ProductNameSearchResultsView: View {
                 }
             }
             .navigationTitle("Results for “\(query)”")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
@@ -356,10 +361,13 @@ struct AddItemView: View {
                         Label("Barcode", systemImage: "barcode")
                         Spacer(minLength: 12)
                         TextField("Number", text: $manualBarcode)
+                            #if os(iOS)
                             .keyboardType(.numberPad)
+                            #endif
                             .multilineTextAlignment(.trailing)
                             .onChange(of: manualBarcode) { _, newValue in updateBarcode(from: newValue) }
                             .accessibilityLabel("Barcode")
+                        #if os(iOS)
                         if category.supportsBarcodeScanning {
                             Button { showingScanner = true } label: {
                                 Image(systemName: "barcode.viewfinder")
@@ -368,6 +376,7 @@ struct AddItemView: View {
                             .accessibilityLabel("Scan barcode")
                             .accessibilityHint("Opens the camera barcode scanner")
                         }
+                        #endif
                     }
 
                     if category.supportsBarcodeScanning {
@@ -446,7 +455,9 @@ struct AddItemView: View {
                 }
 
                 Section("Photo") {
+                    #if os(iOS)
                     Button { showingCamera = true } label: { Label("Take Photo", systemImage: "camera") }
+                    #endif
                     PhotosPicker(selection: $pickerItem, matching: .images) { Label("Choose Existing Photo", systemImage: "photo") }
                         .onChange(of: pickerItem) { _, newValue in
                             Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { handleImage(data) } }
@@ -492,16 +503,20 @@ struct AddItemView: View {
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            #if os(iOS)
             .sheet(isPresented: $showingScanner) {
                 BarcodeScannerSheet { value in
                     selectBarcode(value)
                     lookup(value)
                 }
             }
+            #endif
             .sheet(isPresented: $showingMetadataMapping) {
                 if let sourceSnapshot { ProductMetadataMappingView(snapshot: sourceSnapshot, metadata: $metadata) }
             }
+            #if os(iOS)
             .fullScreenCover(isPresented: $showingCamera) { PhotoCaptureView { handleImage($0) } }
+            #endif
             .onAppear { if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) } }
             .onDisappear { lookupTask?.cancel() }
         }
@@ -908,7 +923,9 @@ private struct MetadataFieldValueEditor: View {
         case .number:
             VStack(alignment: .leading, spacing: 4) {
                 TextField(field.name, text: $numberText)
+                    #if os(iOS)
                     .keyboardType(.decimalPad)
+                    #endif
                     .onChange(of: numberText) { _, newValue in
                         let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                         if trimmed.isEmpty {

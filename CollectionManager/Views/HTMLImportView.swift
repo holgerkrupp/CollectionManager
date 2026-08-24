@@ -15,7 +15,9 @@ struct HTMLImportView: View {
             Form {
                 Section("Source") {
                     TextField("https://… or local HTML file", text: $sourceURL)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never).keyboardType(.URL)
+                        #endif
                     Button { loadRemotePage() } label: { Label("Read web page", systemImage: "globe") }.disabled(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
                     Button { showingFileImporter = true } label: { Label("Choose HTML file", systemImage: "doc.text") }
                 }

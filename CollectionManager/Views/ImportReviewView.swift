@@ -257,109 +257,6 @@ struct ProductMetadataMappingView: View {
     }
 }
 
-struct CSVMappingView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    let table: CSVImportTable
-    @State private var mapping: [ImportColumnDestination]
-    @State private var preparation: ImportPreparation?
-    @State private var conditionalRules: [ConditionalMappingRule] = []
-    @State private var didSuggestMapping = false
-
-    init(table: CSVImportTable) {
-        self.table = table
-        _mapping = State(initialValue: Array(repeating: .ignore, count: table.headers.count))
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    LabeledContent("Rows", value: "\(table.rows.count)")
-                } footer: {
-                    Text("Choose where each source column should be imported. New metadata fields use the source column name.")
-                }
-
-                Section("Map columns") {
-                    ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
-                        ImportColumnMappingPicker(
-                            header: header,
-                            sample: sampleValues(for: index),
-                            existingMetadataFields: store.selectedCollection?.metadataFields ?? [],
-                            destination: Binding(
-                                get: { mapping.indices.contains(index) ? mapping[index] : .ignore },
-                                set: { setMapping($0, at: index) }
-                            )
-                        )
-                    }
-                }
-
-                ConditionalMappingRulesSection(headers: table.headers, statuses: store.statuses, metadataFields: store.selectedCollection?.metadataFields ?? [], rules: $conditionalRules)
-
-                Section {
-                    Text("Number and Date are suggested only when the populated source values can be parsed. You can override every suggestion before reviewing the import.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Map CSV columns")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Review") { prepareReview() }
-                        .disabled(!mapping.contains(.standard(.title)))
-                }
-            }
-            .onAppear {
-                guard !didSuggestMapping else { return }
-                mapping = CollectionImporter().suggestMapping(for: table, existingMetadataFields: store.selectedCollection?.metadataFields ?? [])
-                didSuggestMapping = true
-            }
-            .sheet(item: $preparation) { preparation in
-                ImportReviewView(
-                    drafts: preparation.drafts,
-                    metadataFieldsToCreate: preparation.newMetadataFields,
-                    metadataFields: preparation.metadataFields,
-                    onImport: { dismiss() }
-                )
-            }
-        }
-    }
-
-    private func setMapping(_ destination: ImportColumnDestination, at index: Int) {
-        guard mapping.indices.contains(index) else { return }
-        switch destination {
-        case .standard(let field):
-            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .standard(field) {
-                mapping[otherIndex] = .ignore
-            }
-        case .existingMetadata(let fieldID):
-            for otherIndex in mapping.indices where otherIndex != index && mapping[otherIndex] == .existingMetadata(fieldID) {
-                mapping[otherIndex] = .ignore
-            }
-        default:
-            break
-        }
-        mapping[index] = destination
-    }
-
-    private func sampleValues(for column: Int) -> String {
-        let values = table.rows.compactMap { column < $0.count ? $0[column].trimmingCharacters(in: .whitespacesAndNewlines) : nil }
-            .filter { !$0.isEmpty }
-        return values.isEmpty ? "No populated values" : values.prefix(3).joined(separator: " · ")
-    }
-
-    private func prepareReview() {
-        preparation = CollectionImporter().prepareImport(
-            from: table,
-            mapping: mapping,
-            existingMetadataFields: store.selectedCollection?.metadataFields ?? [],
-            conditionalRules: conditionalRules,
-            validStatusIDs: Set(store.statuses.map(\.id))
-        )
-    }
-}
-
 struct ImportReviewView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -369,14 +266,16 @@ struct ImportReviewView: View {
     let onImport: (() -> Void)?
     let metadataFieldsToCreate: [MetadataFieldDefinition]
     let metadataFields: [MetadataFieldDefinition]
+    let allowsDuplicates: Bool
     @State private var selected: Set<UUID>
     @State private var showingDeduplicationConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var maintenanceMessage: String?
 
-    init(drafts: [ImportDraft], useSourceDeduplication: Bool = false, metadataFieldsToCreate: [MetadataFieldDefinition] = [], metadataFields: [MetadataFieldDefinition] = [], onImport: (() -> Void)? = nil) {
+    init(drafts: [ImportDraft], useSourceDeduplication: Bool = false, metadataFieldsToCreate: [MetadataFieldDefinition] = [], metadataFields: [MetadataFieldDefinition] = [], allowsDuplicates: Bool = false, onImport: (() -> Void)? = nil) {
         self.drafts = drafts
         self.useSourceDeduplication = useSourceDeduplication
+        self.allowsDuplicates = allowsDuplicates
         self.metadataFieldsToCreate = metadataFieldsToCreate
         self.metadataFields = metadataFields
         self.onImport = onImport
@@ -386,15 +285,30 @@ struct ImportReviewView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HStack {
+                        Button(selected.count == drafts.count ? "Deselect all" : "Select all") {
+                            selected = selected.count == drafts.count ? [] : Set(drafts.map(\.id))
+                        }
+                        Spacer()
+                        Text("\(selected.count) of \(drafts.count) selected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Ready to import") {
                     ForEach(drafts) { draft in
-                        HStack {
-                            Image(systemName: selected.contains(draft.id) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selected.contains(draft.id) ? Color.accentColor : Color.secondary)
-                                .onTapGesture { toggleSelection(draft.id) }
-                            ImportDraftDetails(draft: draft, metadataFields: metadataFields)
-                            Spacer()
+                        Button { toggleSelection(draft.id) } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: selected.contains(draft.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selected.contains(draft.id) ? Color.accentColor : Color.secondary)
+                                ImportDraftDetails(draft: draft, metadataFields: metadataFields)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -409,7 +323,7 @@ struct ImportReviewView: View {
                 }
 
                 Section {
-                    Text("Review imported rows before they become permanent items.")
+                    Text(allowsDuplicates ? "Every selected row becomes its own item, even when another item has the same title, brand and variant." : "Rows whose title, brand and variant already exist in the collection are skipped.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -439,6 +353,11 @@ struct ImportReviewView: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+        // A sheet on macOS sizes itself to its content, and a List has no
+        // intrinsic height, so without this the review list collapses to nothing.
+        #if os(macOS)
+        .frame(minWidth: 620, idealWidth: 720, minHeight: 480, idealHeight: 620)
+        #endif
     }
 
     private func toggleSelection(_ id: UUID) {
@@ -452,7 +371,7 @@ struct ImportReviewView: View {
             store.importDrafts(selectedDrafts)
         } else {
             for draft in selectedDrafts {
-                store.addItem(title: draft.title, brand: draft.brand, variant: draft.variant, description: draft.description, state: draft.state, quantity: draft.quantity, tags: draft.tags, metadata: draft.metadata, barcode: draft.barcode, sourceIdentifier: draft.sourceIdentifier)
+                store.addItem(title: draft.title, brand: draft.brand, variant: draft.variant, description: draft.description, state: draft.state, quantity: draft.quantity, tags: draft.tags, metadata: draft.metadata, barcode: draft.barcode, sourceIdentifier: draft.sourceIdentifier, allowsDuplicates: allowsDuplicates)
             }
         }
         onImport?()
@@ -466,39 +385,37 @@ struct ImportDraftDetails: View {
     var metadataFields: [MetadataFieldDefinition] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(draft.title)
                 .font(.headline)
-
-            ImportDraftField(label: "Brand", value: draft.brand)
-            ImportDraftField(label: "Variant", value: draft.variant)
-            ImportDraftField(label: "Description", value: draft.description)
-            ImportDraftField(label: "Status", value: store.status(for: draft.state).name)
-            ImportDraftField(label: "Quantity", value: "\(draft.quantity)")
-            ImportDraftField(label: "Barcode", value: draft.barcode.map { "\($0.value) (\($0.type))" } ?? "—")
-            ImportDraftField(label: "Tags", value: draft.tags.isEmpty ? "—" : draft.tags.joined(separator: ", "))
-            ImportDraftField(label: "Source", value: draft.sourceIdentifier ?? "—")
-            ForEach(metadataFields) { field in
-                if let value = draft.metadata[field.storageKey] {
-                    ImportDraftField(label: field.name, value: value.displayValue)
-                }
+            // A row per field made a 100-row import unreadable, so only the
+            // fields this row actually fills are listed, on one wrapped line.
+            if !details.isEmpty {
+                Text(details)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
     }
-}
 
-private struct ImportDraftField: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value.isEmpty ? "—" : value)
-                .font(.subheadline)
-                .textSelection(.enabled)
+    private var details: String {
+        var parts: [String] = []
+        func add(_ label: String, _ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            parts.append("\(label): \(trimmed)")
         }
+        add("Brand", draft.brand)
+        add("Variant", draft.variant)
+        add("Description", draft.description)
+        add("Status", store.status(for: draft.state).name)
+        if draft.quantity != 1 { add("Quantity", "\(draft.quantity)") }
+        if let barcode = draft.barcode { add("Barcode", barcode.value) }
+        if !draft.tags.isEmpty { add("Tags", draft.tags.joined(separator: ", ")) }
+        for field in metadataFields {
+            if let value = draft.metadata[field.storageKey] { add(field.name, value.displayValue) }
+        }
+        return parts.joined(separator: "  ·  ")
     }
 }

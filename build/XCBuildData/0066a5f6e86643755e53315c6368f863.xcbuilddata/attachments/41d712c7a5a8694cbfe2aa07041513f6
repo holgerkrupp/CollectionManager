@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector-primary.dia",
+    "emit-module-dependencies" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector-primary-emit-module.dia",
+    "pch" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector-primary.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/SFSymbolSelector/Sources/SFSymbolSelector/SFSymbolSelector.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.dia",
+    "index-unit-output-path" : "/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.o",
+    "llvm-bc" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.bc",
+    "object" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector.swiftdeps",
+    "swiftmodule" : "/Users/holgerkrupp/Developer/SFSymbolSelector/build/SFSymbolSelector.build/Debug/SFSymbolSelector-t.build/Objects-normal/x86_64/SFSymbolSelector~partial.swiftmodule"
+  }
+}

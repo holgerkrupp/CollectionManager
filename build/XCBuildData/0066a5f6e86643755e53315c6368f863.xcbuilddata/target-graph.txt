@@ -1,0 +1,6 @@
+Target dependency graph (3 targets)
+Target 'CollectionManager' in project 'CollectionManager'
+➜ Explicit dependency on target 'SFSymbolSelector-product' in project 'SFSymbolSelector'
+Target 'SFSymbolSelector-product' in project 'SFSymbolSelector'
+➜ Explicit dependency on target 'SFSymbolSelector' in project 'SFSymbolSelector'
+Target 'SFSymbolSelector' in project 'SFSymbolSelector' (no dependencies)

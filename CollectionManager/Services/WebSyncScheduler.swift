@@ -1,10 +1,14 @@
+import Foundation
+#if os(iOS)
 import BackgroundTasks
+#endif
 import SwiftData
 
 enum WebSyncScheduler {
     static let identifier = "de.holgerkrupp.CollectionManager.web-sync"
 
     static func register(container: ModelContainer) {
+        #if os(iOS)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
             let work = Task { @MainActor in
                 let context = ModelContext(container)
@@ -23,11 +27,16 @@ enum WebSyncScheduler {
             }
             task.expirationHandler = { work.cancel() }
         }
+        #endif
+        // macOS has no BGTaskScheduler equivalent. The app's foreground sync
+        // loop (started while the scene is active) keeps web sources current
+        // instead, so there is nothing to register here.
     }
 
     /// Submits one request for the source that is due next. iOS decides the
     /// actual launch time, so `earliestBeginDate` is deliberately a lower bound.
     @MainActor static func schedule(context: ModelContext) {
+        #if os(iOS)
         let syncs = enabledSyncs(in: context)
         guard let nextDate = syncs.map({ nextDueDate(for: $0) }).min() else {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
@@ -45,6 +54,7 @@ enum WebSyncScheduler {
             // There is no useful recovery action here: the app resubmits when it
             // becomes active, and iOS may temporarily reject a request by policy.
         }
+        #endif
     }
 
     @MainActor private static func enabledSyncs(in context: ModelContext) -> [WebSyncRecord] {

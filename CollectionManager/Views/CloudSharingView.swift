@@ -23,6 +23,7 @@ struct CloudSharingView: View {
     }
 }
 
+#if os(iOS)
 struct CloudSharingControllerView: UIViewControllerRepresentable {
     let share: CKShare; let onDismiss: DismissAction; let onShareChanged: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss, onShareChanged: onShareChanged) }
@@ -30,3 +31,51 @@ struct CloudSharingControllerView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UICloudSharingController, context: Context) { }
     final class Coordinator: NSObject, UICloudSharingControllerDelegate { let onDismiss: DismissAction; let onShareChanged: () -> Void; init(onDismiss: DismissAction, onShareChanged: @escaping () -> Void) { self.onDismiss = onDismiss; self.onShareChanged = onShareChanged }; func cloudSharingController(_ c: UICloudSharingController, failedToSaveShareWithError error: Error) { }; func itemTitle(for c: UICloudSharingController) -> String? { c.share?.recordID.recordName }; func cloudSharingControllerDidSaveShare(_ c: UICloudSharingController) { onShareChanged() }; func cloudSharingControllerDidStopSharing(_ c: UICloudSharingController) { onShareChanged(); onDismiss() } }
 }
+#elseif os(macOS)
+import AppKit
+
+/// macOS has no direct equivalent of UICloudSharingController. Present the
+/// system share sheet (NSSharingServicePicker) with the CKShare, which lets
+/// the user send the invitation the same way as any other shared item.
+struct CloudSharingControllerView: NSViewControllerRepresentable {
+    let share: CKShare; let onDismiss: DismissAction; let onShareChanged: () -> Void
+
+    func makeNSViewController(context: Context) -> NSViewController {
+        let controller = CloudSharingHostController()
+        controller.share = share
+        controller.onShareChanged = onShareChanged
+        controller.onDismiss = onDismiss
+        return controller
+    }
+
+    func updateNSViewController(_ controller: NSViewController, context: Context) { }
+
+    final class CloudSharingHostController: NSViewController {
+        var share: CKShare?
+        var onShareChanged: (() -> Void)?
+        var onDismiss: DismissAction?
+        private var didPresent = false
+
+        override func loadView() { view = NSView() }
+
+        override func viewDidAppear() {
+            super.viewDidAppear()
+            guard !didPresent, let share else { return }
+            didPresent = true
+            let picker = NSSharingServicePicker(items: [share])
+            picker.delegate = self
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                picker.show(relativeTo: .zero, of: self.view, preferredEdge: .minY)
+            }
+        }
+    }
+}
+
+extension CloudSharingControllerView.CloudSharingHostController: NSSharingServicePickerDelegate {
+    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        onShareChanged?()
+        onDismiss?()
+    }
+}
+#endif

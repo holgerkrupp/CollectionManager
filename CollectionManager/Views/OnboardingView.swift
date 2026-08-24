@@ -37,7 +37,9 @@ struct OnboardingView: View {
                     .tag(index)
                 }
             }
+            #if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .always))
+            #endif
 
             Button(action: advance) {
                 Text(page == pages.count - 1 ? "Get Started" : "Next")

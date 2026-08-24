@@ -174,7 +174,9 @@ struct CollectionTableView: View {
             set: { draft.wrappedValue.quantity = max(1, min(999, Int($0.filter(\.isNumber)) ?? 1)) }
         ))
         .textFieldStyle(.plain)
+        #if os(iOS)
         .keyboardType(.numberPad)
+        #endif
         .multilineTextAlignment(.trailing)
         .disabled(!canEdit)
     }
@@ -354,7 +356,7 @@ struct CollectionTableView: View {
     }
 
     private func deletableItems(ids: Set<CollectionItem.ID>) -> [CollectionItem] {
-        store.items.filter { ids.contains($0.id) && $0.state != .consumed }
+        store.items.filter { ids.contains($0.id) }
     }
 
     private func deleteItems(ids: Set<CollectionItem.ID>) {

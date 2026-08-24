@@ -21,6 +21,9 @@ import SwiftData
     private(set) var stats: (stored: Int, consumed: Int, wanted: Int) = (0, 0, 0)
     private(set) var pendingItemOperations: Set<UUID> = []
     private(set) var isBulkOperationInProgress = false
+    /// Set when a delete could not be applied, so the UI can explain it
+    /// instead of leaving the row silently in place.
+    var itemActionError: String?
     var isLoading = false
     var lastWebSyncMessage: String?
     var syncState: CollectionSyncState = .idle
@@ -84,10 +87,10 @@ import SwiftData
             await loadSelectedCollectionInBackground()
         }
     }
-    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil) {
+    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil, allowsDuplicates: Bool = false) {
         guard let collectionID = selectedCollection?.id else { return }
         let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
-        guard repository?.addItem(item) == true else { return }
+        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { return }
         items.insert(item, at: 0)
         Task { await syncCollections() }
     }
@@ -114,14 +117,25 @@ import SwiftData
     func setRating(_ value: Int?, for item: CollectionItem) { repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id) }
     @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? { let comment = repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment }
     func deleteItem(_ item: CollectionItem) async {
-        guard item.state != .consumed, !pendingItemOperations.contains(item.id) else { return }
+        guard !pendingItemOperations.contains(item.id) else { return }
         pendingItemOperations.insert(item.id)
+        let previousIndex = items.firstIndex { $0.id == item.id }
         items.removeAll { $0.id == item.id }
         // Let SwiftUI commit the optimistic removal/progress state before the
         // local SwiftData transaction starts.
         await Task.yield()
         let succeeded = await backgroundRepository?.deleteItem(id: item.id, collectionID: item.collectionID) ?? false
-        if !succeeded { items.append(item) }
+        if succeeded {
+            // Push the tombstone while the app is in the foreground instead of
+            // waiting for the next periodic sync.
+            Task { await syncCollections() }
+        } else {
+            // Put the row back where it was and say so. A silent failure that
+            // looked like a successful delete until the next refresh was the
+            // main reason deleting felt unreliable.
+            items.insert(item, at: min(previousIndex ?? items.count, items.count))
+            itemActionError = "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items."
+        }
         pendingItemOperations.remove(item.id)
     }
     func deleteAllItems() async -> Int {
@@ -131,8 +145,12 @@ import SwiftData
         items = []
         await Task.yield()
         let removed = await backgroundRepository?.deleteAllItems(in: collectionID) ?? repository.deleteAllItems(in: collectionID)
-        if removed == 0, !previousItems.isEmpty { loadSelectedCollection() }
+        if removed == 0, !previousItems.isEmpty {
+            loadSelectedCollection()
+            itemActionError = "The items could not be deleted. Only an owner or an editor of this collection can remove items."
+        }
         isBulkOperationInProgress = false
+        if removed > 0 { Task { await syncCollections() } }
         return removed
     }
     func saveWebSync(_ sync: WebSyncRecord) { repository?.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
@@ -158,13 +176,15 @@ import SwiftData
         let payload = await backgroundRepository.syncPayload(collectionIDs: localCollections.map(\.id))
         let mutationIDs = Set(mutations.map(\.id))
         do {
-            let snapshots = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
-            // Remove the mutations that were just pushed before merging. The
-            // merge may enqueue recovery mutations for data previously routed
-            // to a participant's private duplicate, and those must survive for
-            // the next shared-zone sync.
-            repository.removeMutations(withIDs: mutationIDs)
-            let notificationChanges = repository.merge(snapshots)
+            let result = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
+            // Remove the mutations that were actually written before merging.
+            // Anything the push skipped stays queued, so the merge still treats
+            // it as a tombstone and a pending delete cannot be resurrected by
+            // the snapshot. The merge may also enqueue recovery mutations for
+            // data previously routed to a participant's private duplicate, and
+            // those must survive for the next shared-zone sync.
+            repository.removeMutations(withIDs: result.appliedMutationIDs)
+            let notificationChanges = repository.merge(result.snapshots)
             LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
             if !repository.pendingMutations().isEmpty {
                 syncRequestedWhileSyncing = true

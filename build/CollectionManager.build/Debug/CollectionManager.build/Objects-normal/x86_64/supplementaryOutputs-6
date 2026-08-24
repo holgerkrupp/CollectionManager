@@ -1,0 +1,23 @@
+{
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/RecognitionServices.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/RecognitionServices.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/Repositories.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/Repositories.swiftdeps"
+  },
+  "/Users/holgerkrupp/Developer/CollectionManager/CollectionManager/Services/TagUtilities.swift" : {
+    "const-values" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.swiftconstvalues",
+    "dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.d",
+    "diagnostics" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.dia",
+    "object" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.o",
+    "swift-dependencies" : "/Users/holgerkrupp/Developer/CollectionManager/build/CollectionManager.build/Debug/CollectionManager.build/Objects-normal/x86_64/TagUtilities.swiftdeps"
+  }
+}

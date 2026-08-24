@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UIKit
 
 struct ItemState: RawRepresentable, Codable, Hashable, Identifiable, Sendable {
     let rawValue: String
@@ -417,7 +416,7 @@ struct CollaboratorIdentity: Sendable {
             return value
         }()
         let name = defaults.string(forKey: nameKey) ?? {
-            let value = UIDevice.current.name.isEmpty ? "Collaborator" : UIDevice.current.name
+            let value = PlatformDeviceName.current.isEmpty ? "Collaborator" : PlatformDeviceName.current
             defaults.set(value, forKey: nameKey)
             return value
         }()

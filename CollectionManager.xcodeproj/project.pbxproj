@@ -6,6 +6,10 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		486BA2D2303C141E00B04A4E /* SFSymbolSelector in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000001 /* SFSymbolSelector */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* CollectionManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CollectionManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -35,6 +39,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				486BA2D2303C141E00B04A4E /* SFSymbolSelector in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -72,10 +77,10 @@
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* CollectionManager */,
 			);
+			name = CollectionManager;
 			packageProductDependencies = (
 				000000000000000200000001 /* SFSymbolSelector */,
 			);
-			name = CollectionManager;
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* CollectionManager.app */;
 			productType = "com.apple.product-type.application";
@@ -105,7 +110,7 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */,
+				000000000000000200000000 /* XCLocalSwiftPackageReference "../SFSymbolSelector" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -400,7 +405,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */ = {
+		000000000000000200000000 /* XCLocalSwiftPackageReference "../SFSymbolSelector" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../SFSymbolSelector;
 		};
@@ -409,7 +414,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		000000000000000200000001 /* SFSymbolSelector */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000200000000 /* XCLocalSwiftPackageReference "SFSymbolSelector" */;
+			package = 000000000000000200000000 /* XCLocalSwiftPackageReference "../SFSymbolSelector" */;
 			productName = SFSymbolSelector;
 		};
 /* End XCSwiftPackageProductDependency section */

@@ -64,7 +64,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .fullScreenCover(isPresented: $showingOnboarding) {
+            .platformFullScreenCover(isPresented: $showingOnboarding) {
                 OnboardingView {
                     onboardingCompleted = true
                     showingOnboarding = false
@@ -194,9 +194,11 @@ struct CollectionSettingsView: View {
             }
             .navigationTitle("Collection settings")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                #if os(iOS)
+                ToolbarItem(placement: .platformLeading) {
                     EditButton()
                 }
+                #endif
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { save() }
                 }
@@ -263,7 +265,9 @@ struct StatusEditorView: View {
                     }
                 }
                 TextField("SF Symbol", text: $status.symbol)
+                    #if os(iOS)
                     .textInputAutocapitalization(.never)
+                    #endif
                 SFSymbolSelector(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
             }
             Section("Preview") {
@@ -277,9 +281,24 @@ struct StatusEditorView: View {
 
 struct EditCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let original: CollectionModel
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var name: String; @State private var subtitle: String; @State private var icon: String; @State private var category: CollectionCategory
     init(collection: CollectionModel) { original = collection; _name = State(initialValue: collection.name); _subtitle = State(initialValue: collection.subtitle); _icon = State(initialValue: collection.icon); _category = State(initialValue: collection.category) }
-    var body: some View { NavigationStack { Form { TextField("Name", text: $name); categoryPicker; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); NavigationLink("Customize statuses and metadata") { CollectionSettingsView(collection: store.selectedCollection ?? original) } } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+    var body: some View { NavigationStack { Form { TextField("Name", text: $name); categoryPicker; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); customizeStatusesAndMetadata } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+
+    /// macOS opens the resizable settings window instead of pushing a form into
+    /// this sheet. The sheet is deliberately left open so pending name or icon
+    /// edits are not discarded.
+    @ViewBuilder private var customizeStatusesAndMetadata: some View {
+        #if os(macOS)
+        Button("Customize Statuses and Metadata…") { openWindow(id: CollectionSettingsWindow.id, value: original.id) }
+        #else
+        NavigationLink("Customize statuses and metadata") { CollectionSettingsView(collection: store.selectedCollection ?? original) }
+        #endif
+    }
+
     @ViewBuilder private var categoryPicker: some View {
         Picker("Category", selection: $category) {
             ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in
