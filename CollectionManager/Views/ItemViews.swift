@@ -1,7 +1,7 @@
 import SwiftUI
 import PhotosUI
 
-private enum MetadataColorCodec {
+enum MetadataColorCodec {
     static func color(from value: MetadataValue?) -> Color? {
         guard case .string(let rawValue)? = value else { return nil }
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
