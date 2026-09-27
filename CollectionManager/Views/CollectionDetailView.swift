@@ -1,5 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppIntents
+import TipKit
 
 struct CollectionDetailView: View {
     @Environment(AppStore.self) private var store
@@ -11,6 +13,9 @@ struct CollectionDetailView: View {
     @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
     @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportFile: CSVParsedFile?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
+    private let tableLayoutTip = TableLayoutTip()
+    private let bulkEditTip = BulkEditTip()
+    private let shareTip = ShareCollectionTip()
     var body: some View {
         @Bindable var store = store
         Group { if showsTableLayout { tableLayout } else { cardLayout } }
@@ -20,8 +25,13 @@ struct CollectionDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .searchable(text: $store.searchText, prompt: "Search items, metadata, tags…")
-            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if horizontalSizeClass == .regular { layoutPicker }; Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); editCollectionMenuItem; Button { showingSharing = true } label: { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }.buttonStyle(.bordered); Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent) } }
+            .onSubmit(of: .search) { AppTips.listFiltered.sendDonation() }
+            .task(id: store.items.count) { TableLayoutTip.itemCount = store.items.count }
+            .onChange(of: prefersTableLayout, initial: true) { _, usesTable in if usesTable { tableLayoutTip.invalidate(reason: .actionPerformed) } }
+            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if horizontalSizeClass == .regular { layoutPicker }; moreMenu; Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent).help("Add a new item to this collection") } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
+            .sheet(item: $store.openedItem) { EditItemView(item: $0) }
+            .appEntityIdentifier(store.selectedCollection.map { EntityIdentifier(for: CollectionEntity.self, identifier: $0.id) })
             .sheet(isPresented: $showingBulkEdit) { BulkEditItemsView(items: store.visibleItems) }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .text], allowsMultipleSelection: false) { result in
                 guard case .success(let urls) = result, let url = urls.first else { return }
@@ -74,6 +84,26 @@ struct CollectionDetailView: View {
                 Text(csvImportError ?? "The file could not be read.")
             }
     }
+    private var moreMenu: some View {
+        Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); editCollectionMenuItem; Button(action: openSharing) { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("More")
+            .help("Import, share, and manage this collection")
+            // Sharing lives in this menu, so the tip points at it and offers
+            // the action directly instead of explaining where to find it.
+            .popoverTip(canShare ? shareTip : nil) { action in
+                if action.id == ShareCollectionTip.shareActionID { openSharing() }
+            }
+    }
+
+    private var canShare: Bool { store.selectedCollection?.role.canEdit == true }
+    private var canBulkEdit: Bool { !store.visibleItems.isEmpty && store.selectedCollection?.role.canEdit == true }
+
+    private func openSharing() {
+        shareTip.invalidate(reason: .actionPerformed)
+        showingSharing = true
+    }
+
     /// macOS folds the name, icon, and category fields into the General pane of
     /// the settings window, so there is one entry point instead of a sheet that
     /// links onward to a second editor.
@@ -122,6 +152,7 @@ struct CollectionDetailView: View {
         .labelsHidden()
         .frame(width: 120)
         .help("Switch between the card list and the editable table")
+        .popoverTip(tableLayoutTip)
     }
 
     private var header: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text("Your shared shelf").font(.title2.bold()); Text("Everything you want to remember, together.").foregroundStyle(.secondary) }; Spacer(); Image(systemName: store.selectedCollection?.icon ?? "square.stack").font(.system(size: 32)).foregroundStyle(.pink).padding(14).background(.pink.opacity(0.12), in: .circle) } }
@@ -136,18 +167,20 @@ struct CollectionDetailView: View {
                     let state = ItemState(rawValue: status.id)
                     FilterChip(title: status.name, icon: status.symbol, isSelected: store.selectedState == state) {
                         store.selectedState = store.selectedState == state ? nil : state
+                        AppTips.listFiltered.sendDonation()
                     }
                     .tint(status.color.color)
                 }
                 Menu {
                     Button("All brands") { store.selectedBrand = nil }
                     ForEach(store.brands, id: \.self) { brand in
-                        Button(brand) { store.selectedBrand = brand }
+                        Button(brand) { store.selectedBrand = brand; AppTips.listFiltered.sendDonation() }
                     }
                 } label: {
                     Label(store.selectedBrand ?? "Brand", systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .buttonStyle(.bordered)
+                .help("Show only items from one brand")
                 Menu {
                     ForEach(ItemSort.builtInCases.filter { $0 == .updatedDescending || $0 == .titleAscending || store.hasDateTags }, id: \.self) { sort in
                         Button { store.itemSort = sort } label: {
@@ -181,11 +214,17 @@ struct CollectionDetailView: View {
                     Label(store.itemSortLabel, systemImage: "arrow.up.arrow.down")
                 }
                 .buttonStyle(.bordered)
-                Button { showingBulkEdit = true } label: {
+                .help("Choose how items are ordered")
+                Button {
+                    bulkEditTip.invalidate(reason: .actionPerformed)
+                    showingBulkEdit = true
+                } label: {
                     Label("Edit \(store.visibleItems.count) items", systemImage: "square.and.pencil")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.visibleItems.isEmpty || store.selectedCollection?.role.canEdit != true)
+                .disabled(!canBulkEdit)
+                .help("Change the status of every item in the list")
+                .popoverTip(canBulkEdit ? bulkEditTip : nil)
             }
         }
     }

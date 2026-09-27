@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("global.defaultCollectionIcon") private var defaultIcon = "square.stack.3d.up.fill"
     @AppStorage("global.confirmDeletes") private var confirmDeletes = true
     @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
+    @AppStorage(AppTips.resetRequestKey) private var tipsResetRequested = false
     @State private var gamesEANAPIKey = ""
     @State private var showingDeduplicationConfirmation = false
     @State private var showingOnboarding = false
@@ -40,6 +41,17 @@ struct SettingsView: View {
                         showingOnboarding = true
                     } label: {
                         Label("Show Onboarding", systemImage: "questionmark.circle")
+                    }
+                    Button {
+                        tipsResetRequested = true
+                    } label: {
+                        Label("Show Tips Again", systemImage: "lightbulb")
+                    }
+                    .disabled(tipsResetRequested)
+                    if tipsResetRequested {
+                        Text("Tips will appear again the next time you open the app.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

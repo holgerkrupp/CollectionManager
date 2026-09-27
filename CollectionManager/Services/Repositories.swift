@@ -181,7 +181,7 @@ actor CollectionBackgroundRepository {
         if migrated { save() }
         return items
     }
-    func item(id itemID: UUID, in collectionID: UUID) -> CollectionItem? {
+    func item(id itemID: UUID, in collectionID: UUID? = nil) -> CollectionItem? {
         guard let record = try? context.fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return nil }
         var item = record.domain
         item.ratings = ((try? context.fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.itemID == itemID }))) ?? []).map(\.domain).sorted { $0.participantName.localizedStandardCompare($1.participantName) == .orderedAscending }

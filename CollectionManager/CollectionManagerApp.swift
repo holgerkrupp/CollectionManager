@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import CloudKit
+import AppIntents
 #if os(iOS)
 import UIKit
 
@@ -78,8 +79,9 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     let container: ModelContainer
-    @State private var store = AppStore()
+    @State private var store: AppStore
     init() {
+        AppTips.configure()
         let models: Schema = Schema([
             CollectionRecord.self,
             CollectionMemberRecord.self,
@@ -98,6 +100,13 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
             ?? (try? ModelContainer(for: models, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
             ?? Self.unrecoverableContainer()
         WebSyncScheduler.register(container: container)
+
+        // App Intents can run in the background before any window exists,
+        // so the store is configured here instead of when a scene activates.
+        let store = AppStore()
+        store.configure(context: container.mainContext, container: container)
+        _store = State(initialValue: store)
+        AppDependencyManager.shared.add(dependency: store)
     }
 
     private static func unrecoverableContainer() -> ModelContainer {
@@ -122,6 +131,7 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
                     await Task.yield()
                     await store.loadSelectedCollectionInBackground()
                     await store.syncCollections()
+                    await store.updateSpotlightIndex()
 
                     // CloudKit collaboration changes can arrive while the app
                     // remains open. Refresh periodically while active so edits

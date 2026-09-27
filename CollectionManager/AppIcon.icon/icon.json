@@ -1,6 +1,6 @@
 {
   "fill" : {
-    "automatic-gradient" : "srgb:0.38040,0.73145,0.27449,1.00000"
+    "automatic-gradient" : "srgb:0.93607,0.42824,0.74521,1.00000"
   },
   "groups" : [
     {
@@ -8,64 +8,39 @@
         {
           "blend-mode" : "normal",
           "fill" : {
-            "automatic-gradient" : "display-p3:0.81348,0.28467,0.27124,1.00000"
+            "solid" : "srgb:0.00000,0.23440,0.00000,1.00000"
           },
           "glass" : true,
-          "image-name" : "rectangle-copy.svg",
-          "name" : "Rectangle copy",
-          "opacity" : 0.5961268187830688,
+          "image-name" : "f-1.svg",
+          "name" : "f 1",
+          "opacity" : 1,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
-              31.24190273375592,
-              44.619787539619665
+              -24.019417475728233,
+              -27.35922330097094
             ]
           }
         },
         {
           "blend-mode" : "normal",
           "fill" : {
-            "automatic-gradient" : "srgb:0.22000,0.55000,1.00000,1.00000"
+            "solid" : "srgb:0.00000,0.35494,0.00000,1.00000"
           },
           "glass" : true,
-          "image-name" : "rectangle-3.svg",
-          "name" : "Rectangle copy",
-          "opacity" : 0.5999503968253969,
+          "image-name" : "c.svg",
+          "name" : "c",
+          "opacity" : 1,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
-              8.382255348652905,
-              15.141045000000076
-            ]
-          }
-        },
-        {
-          "blend-mode" : "normal",
-          "fill" : {
-            "automatic-gradient" : "display-p3:0.27295,0.60840,0.84131,1.00000"
-          },
-          "glass" : true,
-          "image-name" : "rectangle-2.svg",
-          "name" : "Rectangle",
-          "opacity" : 0.6036706349206349,
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              -12.586222266244135,
-              -22.216149960380335
+              -24.019417475728233,
+              -27.35922330097094
             ]
           }
         }
       ],
-      "lighting" : "individual",
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.6
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.2
-      }
+      "lighting" : "individual"
     }
   ],
   "supported-platforms" : {

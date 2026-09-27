@@ -24,6 +24,9 @@ import SwiftData
     /// Set when a delete could not be applied, so the UI can explain it
     /// instead of leaving the row silently in place.
     var itemActionError: String?
+    /// An item an App Intent asked to bring on screen. The collection detail
+    /// view presents it and clears it when the sheet closes.
+    var openedItem: CollectionItem?
     var isLoading = false
     var lastWebSyncMessage: String?
     var syncState: CollectionSyncState = .idle
@@ -87,12 +90,16 @@ import SwiftData
             await loadSelectedCollectionInBackground()
         }
     }
-    func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil, allowsDuplicates: Bool = false) {
-        guard let collectionID = selectedCollection?.id else { return }
+    /// Adds to `collectionID`, or to the selected collection when it is nil.
+    /// Returns nil when the item was rejected as a duplicate or not editable.
+    @discardableResult func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil, allowsDuplicates: Bool = false, collectionID: UUID? = nil) -> CollectionItem? {
+        guard let collectionID = collectionID ?? selectedCollection?.id else { return nil }
         let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
-        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { return }
-        items.insert(item, at: 0)
+        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { return nil }
+        if collectionID == selectedCollection?.id { items.insert(item, at: 0) }
+        indexInSpotlight([item])
         Task { await syncCollections() }
+        return item
     }
     @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int {
         guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
@@ -113,11 +120,11 @@ import SwiftData
     func deleteAllImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed }
     func applyTagRules(_ options: TagGenerationOptions) -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed }
     func applyMergedTagsToExistingItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed }
-    func updateItem(_ item: CollectionItem, previousState: ItemState) { repository?.updateItem(item, previousState: previousState); replaceItem(item) }
+    func updateItem(_ item: CollectionItem, previousState: ItemState) { repository?.updateItem(item, previousState: previousState); replaceItem(item); indexInSpotlight([item]) }
     func setRating(_ value: Int?, for item: CollectionItem) { repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id) }
     @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? { let comment = repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment }
-    func deleteItem(_ item: CollectionItem) async {
-        guard !pendingItemOperations.contains(item.id) else { return }
+    @discardableResult func deleteItem(_ item: CollectionItem) async -> Bool {
+        guard !pendingItemOperations.contains(item.id) else { return false }
         pendingItemOperations.insert(item.id)
         let previousIndex = items.firstIndex { $0.id == item.id }
         items.removeAll { $0.id == item.id }
@@ -126,6 +133,7 @@ import SwiftData
         await Task.yield()
         let succeeded = await backgroundRepository?.deleteItem(id: item.id, collectionID: item.collectionID) ?? false
         if succeeded {
+            removeFromSpotlight(itemIDs: [item.id])
             // Push the tombstone while the app is in the foreground instead of
             // waiting for the next periodic sync.
             Task { await syncCollections() }
@@ -137,6 +145,7 @@ import SwiftData
             itemActionError = "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items."
         }
         pendingItemOperations.remove(item.id)
+        return succeeded
     }
     func deleteAllItems() async -> Int {
         guard let repository, let collectionID = selectedCollection?.id, !isBulkOperationInProgress else { return 0 }
@@ -204,6 +213,53 @@ import SwiftData
     }
     func acceptShare(from url: URL) async { do { try await CloudKitSharingService().acceptShare(from: url); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
     func acceptShare(metadata: CKShare.Metadata) async { do { try await CloudKitSharingService().acceptShare(metadata: metadata); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
+    // MARK: App Intents support
+
+    /// Collections for App Intents, which can run before any window has
+    /// appeared and loaded them.
+    func intentCollections() -> [CollectionModel] {
+        if collections.isEmpty { loadCollections() }
+        return collections
+    }
+    /// Items across every collection, not only the one on screen.
+    func intentItems() -> [CollectionItem] {
+        guard let repository else { return [] }
+        return intentCollections().flatMap { repository.items(in: $0.id) }
+    }
+    func item(id: UUID) -> CollectionItem? { repository?.item(id: id) }
+    /// Moves items in any collection to `state`, skipping collections that
+    /// cannot be edited or do not define that status. Returns the changed
+    /// items as they were before, so the change can be undone.
+    @discardableResult func setState(_ state: ItemState, forItemIDs itemIDs: some Sequence<UUID>) -> [CollectionItem] {
+        guard let repository else { return [] }
+        let collectionsByID = Dictionary(uniqueKeysWithValues: intentCollections().map { ($0.id, $0) })
+        let targets = Set(itemIDs).compactMap { repository.item(id: $0) }.filter { $0.state != state }
+        var changed: [CollectionItem] = []
+        for (collectionID, group) in Dictionary(grouping: targets, by: \.collectionID) {
+            guard let collection = collectionsByID[collectionID], collection.role.canEdit,
+                  collection.statuses.contains(where: { $0.id == state.rawValue }) else { continue }
+            if repository.bulkUpdateState(for: Set(group.map(\.id)), in: collectionID, to: state) > 0 { changed += group }
+        }
+        guard !changed.isEmpty else { return [] }
+        loadSelectedCollection()
+        indexInSpotlight(changed.compactMap { repository.item(id: $0.id) })
+        Task { await syncCollections() }
+        return changed
+    }
+    /// Puts items back to the statuses captured in `snapshot`.
+    func restoreStates(_ snapshot: [CollectionItem]) {
+        for (state, group) in Dictionary(grouping: snapshot, by: \.state) { setState(state, forItemIDs: group.map(\.id)) }
+    }
+    func open(collectionID: UUID) {
+        guard intentCollections().contains(where: { $0.id == collectionID }) else { return }
+        select(collectionID)
+    }
+    func open(itemID: UUID) {
+        guard let item = item(id: itemID) else { return }
+        open(collectionID: item.collectionID)
+        openedItem = item
+    }
+
     var statuses: [CollectionStatus] {
         guard let configured = selectedCollection?.statuses, !configured.isEmpty else { return CollectionStatus.defaults }
         return configured

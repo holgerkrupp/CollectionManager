@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI
+import AppIntents
+import TipKit
 
 enum MetadataColorCodec {
     static func color(from value: MetadataValue?) -> Color? {
@@ -61,6 +63,8 @@ struct ItemCard: View {
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 20))
         .contentShape(Rectangle())
+        // Lets Siri resolve "this item" to the card on screen.
+        .appEntityIdentifier(EntityIdentifier(for: ItemEntity.self, identifier: item.id))
         .onTapGesture { showingEdit = true }
         .contextMenu {
             Button { showingEdit = true } label: { Label("Edit", systemImage: "pencil") }
@@ -352,10 +356,16 @@ private struct ProductNameSearchResultsView: View {
 struct AddItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
     @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var sourceSnapshot: ProductSourceSnapshot?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var showingMetadataMapping = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var lookupMessage: String?; @State private var photoMessage: String?; @State private var productMatches: [CollectionProductMatch] = []; @State private var lookupTask: Task<Void, Never>?; @State private var lookupSuggestions = ProductLookupSuggestions()
+    private let scanBarcodeTip = ScanBarcodeTip(); private let siriTip = AddItemsWithSiriTip(); @State private var showsSiriTip = false
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
             Form {
+                // Only inserted while eligible, so the form has no empty section otherwise.
+                if showsSiriTip {
+                    Section { TipView(siriTip) }
+                }
+
                 Section {
                     HStack {
                         Label("Barcode", systemImage: "barcode")
@@ -369,12 +379,16 @@ struct AddItemView: View {
                             .accessibilityLabel("Barcode")
                         #if os(iOS)
                         if category.supportsBarcodeScanning {
-                            Button { showingScanner = true } label: {
+                            Button {
+                                scanBarcodeTip.invalidate(reason: .actionPerformed)
+                                showingScanner = true
+                            } label: {
                                 Image(systemName: "barcode.viewfinder")
                             }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Scan barcode")
                             .accessibilityHint("Opens the camera barcode scanner")
+                            .popoverTip(scanBarcodeTip)
                         }
                         #endif
                     }
@@ -497,7 +511,8 @@ struct AddItemView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         lookupTask?.cancel()
-                        store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData, sourceSnapshot: sourceSnapshot)
+                        let added = store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData, sourceSnapshot: sourceSnapshot)
+                        if added != nil { AppTips.itemAdded.sendDonation() }
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -519,6 +534,7 @@ struct AddItemView: View {
             #endif
             .onAppear { if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) } }
             .onDisappear { lookupTask?.cancel() }
+            .task { for await shouldDisplay in siriTip.shouldDisplayUpdates { showsSiriTip = shouldDisplay } }
         }
     }
     private func updateBarcode(from rawValue: String) {

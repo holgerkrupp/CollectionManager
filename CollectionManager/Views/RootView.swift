@@ -30,7 +30,7 @@ struct RootView: View {
                     Button { showingSettings = true } label: { Label("Settings", systemImage: "gearshape") }
                     #endif
                 }
-            }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .platformTrailing) { Button { showingNewCollection = true } label: { Image(systemName: "plus") } } }
+            }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: selectedCollectionID) { _, id in store.select(id) }.onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .platformTrailing) { Button { showingNewCollection = true } label: { Label("New collection", systemImage: "plus") }.help("Create a new collection") } }
         } detail: { if store.selectedCollection != nil { CollectionDetailView() } else { ContentUnavailableView("No collections yet", systemImage: "square.stack.3d.up", description: Text("Create your first collection to get started.")) } }
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
         #if os(iOS)
@@ -43,8 +43,10 @@ struct RootView: View {
             }
         }
         .onAppear {
+            AppTips.hasCompletedOnboarding = onboardingCompleted
             if !onboardingCompleted { showingOnboarding = true }
         }
+        .onChange(of: onboardingCompleted) { _, completed in AppTips.hasCompletedOnboarding = completed }
         .confirmationDialog("Delete this collection? All items and collection settings will be permanently deleted.", isPresented: Binding(get: { collectionPendingDeletion != nil }, set: { if !$0 { collectionPendingDeletion = nil } }), titleVisibility: .visible) {
             Button("Delete Collection", role: .destructive) { if let collection = collectionPendingDeletion { Task { await store.deleteCollection(collection) } }; collectionPendingDeletion = nil }
         }

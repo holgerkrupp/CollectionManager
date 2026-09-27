@@ -1,4 +1,5 @@
 import SwiftUI
+import TipKit
 
 /// Spreadsheet style editor for a whole collection.
 ///
@@ -126,6 +127,7 @@ struct CollectionTableView: View {
                     Label("Status of \(selection.count) selected", systemImage: "checklist")
                 }
                 .buttonStyle(.bordered)
+                .help("Set one status for all selected rows")
             }
             if pendingChangeCount > 0 {
                 Text("\(pendingChangeCount) unsaved change\(pendingChangeCount == 1 ? "" : "s")")
@@ -133,9 +135,11 @@ struct CollectionTableView: View {
                     .foregroundStyle(.orange)
                 Button("Revert") { drafts.removeAll() }
                     .buttonStyle(.bordered)
+                    .help("Discard the edits you haven’t saved")
             }
             Button("Save") { commitAll() }
                 .buttonStyle(.borderedProminent)
+                .help("Save the edits in every changed row")
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(pendingChangeCount == 0)
         }
@@ -343,7 +347,9 @@ struct CollectionTableView: View {
     private func addItem() {
         let title = newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canEdit, !title.isEmpty else { return }
-        store.addItem(title: title, brand: "", variant: "", description: "", state: store.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted, quantity: 1, tags: [])
+        if store.addItem(title: title, brand: "", variant: "", description: "", state: store.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted, quantity: 1, tags: []) != nil {
+            AppTips.itemAdded.sendDonation()
+        }
         newItemTitle = ""
     }
 
