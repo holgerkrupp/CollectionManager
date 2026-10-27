@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import CloudKit
+import CollaborationCore
 import AppIntents
 import OSLog
 #if os(iOS)
@@ -54,29 +55,56 @@ extension Notification.Name {
 
 @MainActor final class CloudShareInvitationInbox {
     static let shared = CloudShareInvitationInbox()
-
     private var pending: [CKShare.Metadata] = []
-    private var handler: ((CKShare.Metadata) async -> Void)?
+    private var handler: ((CKShare.Metadata) async -> Bool)?
     private var isProcessing = false
+    private var storageKey: String { "collaboration.pendingInvitations." + CloudKitSharingService.environment.rawValue }
 
-    func install(handler: @escaping (CKShare.Metadata) async -> Void) {
+    private init() {
+        let key = "collaboration.pendingInvitations." + CloudKitSharingService.environment.rawValue
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: CKShare.Metadata.self, from: data) {
+            pending = decoded
+        }
+    }
+
+    func install(handler: @escaping (CKShare.Metadata) async -> Bool) {
         self.handler = handler
         processNextIfNeeded()
     }
 
     func receive(_ metadata: CKShare.Metadata) {
-        pending.append(metadata)
+        guard metadata.containerIdentifier == CloudKitSharingService.containerIdentifier else { return }
+        if !pending.contains(where: { $0.share.recordID == metadata.share.recordID }) {
+            pending.append(metadata)
+            persist()
+        }
         processNextIfNeeded()
     }
 
+    private func persist() {
+        do {
+            let data = try NSKeyedArchiver.archivedData(withRootObject: pending, requiringSecureCoding: true)
+            UserDefaults.standard.set(data, forKey: storageKey)
+        } catch {
+            // Preserve in-memory delivery and the prior durable queue for retry.
+            Logger(subsystem: "de.holgerkrupp.CollectionManager", category: "invitations").error("Invitation queue could not be saved")
+        }
+    }
+
     private func processNextIfNeeded() {
-        guard !isProcessing, let handler, !pending.isEmpty else { return }
+        guard !isProcessing, let handler, let metadata = pending.first else { return }
         isProcessing = true
-        let metadata = pending.removeFirst()
         Task {
-            await handler(metadata)
+            let accepted = await handler(metadata)
+            if accepted {
+                pending.removeAll { $0.share.recordID == metadata.share.recordID }
+                persist()
+            }
             isProcessing = false
-            processNextIfNeeded()
+            // A failed delivery stays queued. Foreground activation or another
+            // delivery retries it, without an unbounded network retry loop.
+            if accepted { processNextIfNeeded() }
         }
     }
 }
@@ -119,11 +147,12 @@ extension Notification.Name {
     }
 
     var body: some Scene {
+        let appStore = store
         WindowGroup {
             Group {
                 if let container {
                     RootView()
-                        .environment(store)
+                        .environment(appStore)
                         .task(id: scenePhase) {
                             guard scenePhase == .active, !Self.isRunningTests else { return }
                             store.configure(context: container.mainContext, container: container)
@@ -140,7 +169,7 @@ extension Notification.Name {
                         .onReceive(NotificationCenter.default.publisher(for: .collectionManagerCloudKitDidChange)) { _ in
                             Task { await store.syncCollections() }
                         }
-                        .onOpenURL { url in Task { await store.acceptShare(from: url) } }
+                        .onOpenURL { [store] url in Task { await store.acceptShare(from: url) } }
                 } else if let startupFailure {
                     StoreRecoveryView(failure: startupFailure, retry: retryStore)
                 } else {
@@ -151,7 +180,7 @@ extension Notification.Name {
         #if os(macOS)
         Settings {
             if container != nil {
-                SettingsView().environment(store)
+                SettingsView().environment(appStore)
             } else if let startupFailure {
                 StoreRecoveryView(failure: startupFailure, retry: retryStore)
             }
@@ -162,7 +191,7 @@ extension Notification.Name {
         // collection lets several collections be configured side by side.
         WindowGroup(id: CollectionSettingsWindow.id, for: UUID.self) { $collectionID in
             CollectionSettingsWindowView(collectionID: collectionID)
-                .environment(store)
+                .environment(appStore)
         }
         .defaultSize(width: 940, height: 600)
         .windowResizability(.contentMinSize)
@@ -186,7 +215,8 @@ extension Notification.Name {
             startupFailure = nil
             store.configure(context: openedContainer.mainContext, container: openedContainer)
             if !Self.isRunningTests { WebSyncScheduler.register(container: openedContainer) }
-            AppDependencyManager.shared.add(dependency: store)
+            let configuredStore = store
+            AppDependencyManager.shared.add(dependency: configuredStore)
         } catch {
             startupFailure = PersistentStoreBootstrap.failure(for: error)
         }

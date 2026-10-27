@@ -72,11 +72,6 @@ struct CollectionDetailView: View {
             } message: {
                 Text(store.itemActionError ?? "")
             }
-            .alert("Library save failed", isPresented: Binding(get: { store.persistenceError != nil }, set: { if !$0 { store.persistenceError = nil } })) {
-                Button("OK") { store.persistenceError = nil }
-            } message: {
-                Text(store.persistenceError ?? "The local library could not save this change.")
-            }
             .alert("iCloud sync error", isPresented: $showingSyncError) {
                 Button("Retry") { Task { await store.syncCollections() } }
                 Button("OK", role: .cancel) {}
@@ -90,7 +85,20 @@ struct CollectionDetailView: View {
             }
     }
     private var moreMenu: some View {
-        Menu { Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }; Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }; Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }; Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }; Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }; Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }; Divider(); editCollectionMenuItem; Button(action: openSharing) { Label("Share collection", systemImage: "person.2") } } label: { Image(systemName: "ellipsis.circle") }
+        Menu {
+            Group {
+                Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }
+                Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }
+                Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }
+                Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }
+                Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }
+                Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }
+                editCollectionMenuItem
+            }
+            .disabled(store.selectedCollection?.role.canEdit != true)
+            Divider()
+            Button(action: openSharing) { Label("Share collection", systemImage: "person.2") }
+        } label: { Image(systemName: "ellipsis.circle") }
             .buttonStyle(.bordered)
             .accessibilityLabel("More")
             .help("Import, share, and manage this collection")

@@ -97,10 +97,17 @@ final class CollectionSharingSession {
             unsharedRoots.remove(collectionID)
             try await persistAccess(Self.authoritativeAccess(for: share), share: share, collectionID: collectionID)
         } else {
-            unsharedRoots.insert(collectionID)
-            access.removeValue(forKey: collectionID)
-            // Absence is not proof of revocation; the host retains its local
-            // root and does not delete or downgrade unrelated/owner data.
+            let joined = roots.plans[collectionID]?.rootRecord.recordID.zoneID.ownerName != CKCurrentUserDefaultName
+            if joined {
+                // Confirmed absence fails closed without deleting local data.
+                let unavailable = EffectiveSharingAccess(level: .unavailable, source: .unavailable)
+                try await onAccess(collectionID, unavailable, nil)
+                access[collectionID] = unavailable
+                unsharedRoots.remove(collectionID)
+            } else {
+                unsharedRoots.insert(collectionID)
+                access.removeValue(forKey: collectionID)
+            }
         }
         return share
     }
@@ -126,6 +133,14 @@ final class CollectionSharingSession {
             }
         }
         return EffectiveSharingAccess(level: level, source: .cloudKitShare)
+    }
+
+    func leave(collectionID: UUID) async throws {
+        try await backend.leaveSharing(rootID: collectionID.uuidString)
+        let unavailable = EffectiveSharingAccess(level: .unavailable, source: .unavailable)
+        try await onAccess(collectionID, unavailable, nil)
+        access[collectionID] = unavailable
+        unsharedRoots.remove(collectionID)
     }
 
     func storesDidLoad() async {
@@ -199,6 +214,8 @@ final class CollectionSharingSession {
 
     static func message(for error: Error) -> String {
         if let error = error as? SharingError { return error.localizedDescription }
+        if let error = error as? CollectionCodecError { return error.localizedDescription }
+        if let error = error as? RepositoryError { return error.localizedDescription }
         let failure = (error as? CollaborationFailure) ??
             (error as? any CollaborationFailureReporting)?.collaborationFailure ??
             CollaborationErrorClassifier.classify(error)

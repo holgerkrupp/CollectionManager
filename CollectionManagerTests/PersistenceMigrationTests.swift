@@ -4,9 +4,7 @@ import SwiftData
 
 @MainActor final class PersistenceMigrationTests: XCTestCase {
     func testAuditedV1FixtureOpensWithoutDataLossAndExportsRecoverably() throws {
-        // Source-relative fallback also supports standalone local Xcode runs;
-        // CI checks this fixture into its clean clone.
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/V1/CollectionManager.store")
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "CollectionManager", withExtension: "store"))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

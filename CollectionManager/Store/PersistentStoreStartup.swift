@@ -42,6 +42,9 @@ enum PersistentStoreBootstrap {
         #if DEBUG
         let process = ProcessInfo.processInfo
         if NSClassFromString("XCTestCase") != nil || process.environment["XCTestConfigurationFilePath"] != nil || process.environment["XCTestBundlePath"] != nil || process.arguments.contains("--ui-testing") {
+            if let name = process.environment["CM_TEST_STORE_NAME"], UUID(uuidString: name) != nil {
+                return FileManager.default.temporaryDirectory.appendingPathComponent("CollectionManager-UI-" + name, isDirectory: true).appendingPathComponent("Library.store")
+            }
             if let path = process.environment["CM_TEST_STORE_PATH"], path.hasPrefix(FileManager.default.temporaryDirectory.path) {
                 return URL(fileURLWithPath: path)
             }
@@ -57,7 +60,7 @@ enum PersistentStoreBootstrap {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let configuration = ModelConfiguration(url: storeURL, cloudKitDatabase: .none)
         do {
-            let schema = Schema(CollectionManagerSchemaV1.models)
+            let schema = Schema(CollectionManagerSchemaV2.models)
             return try ModelContainer(for: schema, migrationPlan: CollectionManagerMigrationPlan.self, configurations: configuration)
         } catch {
             logger.error("Persistent store initialization failed: \(String(describing: type(of: error)), privacy: .public)")

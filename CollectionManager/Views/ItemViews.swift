@@ -118,12 +118,12 @@ private struct ItemMetadataSummary: View {
 private struct ItemThumbnail: View {
     let item: CollectionItem
     let tint: Color
-    @State private var image: PlatformImage?
+    @State private var image: CGImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(platformImage: image).resizable().scaledToFill()
+                Image(decorative: image, scale: 1).resizable().scaledToFill()
             } else {
                 Image(systemName: item.imageSystemName).font(.title2).foregroundStyle(tint)
                     .background(tint.opacity(0.12))
@@ -132,8 +132,11 @@ private struct ItemThumbnail: View {
         .frame(width: 54, height: 64)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .task(id: item.imageData) {
-            guard let data = item.imageData else { image = nil; return }
-            image = await Task.detached(priority: .utility) { PlatformImage(data: data) }.value
+            image = nil
+            guard let data = item.imageData else { return }
+            let thumbnail = await ItemThumbnailCache.shared.thumbnail(for: data)
+            guard !Task.isCancelled else { return }
+            image = thumbnail
         }
     }
 }
@@ -512,8 +515,7 @@ struct AddItemView: View {
                     Button("Save") {
                         lookupTask?.cancel()
                         let added = store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData, sourceSnapshot: sourceSnapshot)
-                        if added != nil { AppTips.itemAdded.sendDonation() }
-                        dismiss()
+                        if added != nil { AppTips.itemAdded.sendDonation(); dismiss() }
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -758,7 +760,7 @@ struct EditItemView: View {
             .navigationTitle("Edit item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; store.updateItem(item, previousState: previous); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; if store.updateItem(item, previousState: previous) { dismiss() } } }
             }
             .sheet(isPresented: $showingMetadataMapping) {
                 if let sourceSnapshot { ProductMetadataMappingView(snapshot: sourceSnapshot, metadata: $metadata) }

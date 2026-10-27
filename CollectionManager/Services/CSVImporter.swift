@@ -1,6 +1,6 @@
 import Foundation
 
-struct ImportDraft: Identifiable, Sendable {
+nonisolated struct ImportDraft: Identifiable, Sendable {
     let id = UUID()
     var title: String
     var brand: String
@@ -12,9 +12,10 @@ struct ImportDraft: Identifiable, Sendable {
     var barcode: Barcode?
     var sourceIdentifier: String? = nil
     var metadata: [String: MetadataValue] = [:]
+    var stateWasExplicit: Bool = true
 }
 
-struct CSVImportTable: Identifiable, Sendable {
+nonisolated struct CSVImportTable: Identifiable, Sendable {
     let id = UUID()
     var headers: [String]
     var rows: [[String]]
@@ -23,7 +24,7 @@ struct CSVImportTable: Identifiable, Sendable {
 /// The separators a spreadsheet export realistically uses. Detection picks one
 /// automatically, but the import screen lets people override it because a file
 /// full of semicolons inside quoted text can fool any heuristic.
-enum CSVDelimiter: String, CaseIterable, Identifiable, Codable, Sendable {
+nonisolated enum CSVDelimiter: String, CaseIterable, Identifiable, Codable, Sendable {
     case comma
     case semicolon
     case tab
@@ -53,7 +54,7 @@ enum CSVDelimiter: String, CaseIterable, Identifiable, Codable, Sendable {
 /// A CSV file that has been read but not yet interpreted. Keeping the raw text
 /// around lets the import screen re-parse instantly when the delimiter or the
 /// header setting changes, without touching the file again.
-struct CSVParsedFile: Identifiable, Sendable {
+nonisolated struct CSVParsedFile: Identifiable, Sendable {
     let id = UUID()
     var fileName: String
     var text: String
@@ -61,19 +62,19 @@ struct CSVParsedFile: Identifiable, Sendable {
     var suggestsHeaderRow: Bool
 }
 
-enum ImportColumnDestination: Hashable, Codable, Sendable {
+nonisolated enum ImportColumnDestination: Hashable, Codable, Sendable {
     case ignore
     case standard(HTMLImportField)
     case existingMetadata(UUID)
     case newMetadata(MetadataFieldType)
 }
 
-enum ConditionalMappingAction: Hashable, Codable, Sendable {
+nonisolated enum ConditionalMappingAction: Hashable, Codable, Sendable {
     case status(String)
     case metadata(fieldID: UUID, value: String)
 }
 
-struct ConditionalMappingRule: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct ConditionalMappingRule: Identifiable, Hashable, Codable, Sendable {
     var id = UUID()
     var sourceColumn: String
     var equalsValue: String
@@ -85,19 +86,19 @@ struct ConditionalMappingRule: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-struct ImportPreparation: Identifiable, Sendable {
+nonisolated struct ImportPreparation: Identifiable, Sendable {
     let id = UUID()
     let drafts: [ImportDraft]
     let newMetadataFields: [MetadataFieldDefinition]
     let metadataFields: [MetadataFieldDefinition]
 }
 
-struct MetadataMappingPreparation: Sendable {
+nonisolated struct MetadataMappingPreparation: Sendable {
     let metadata: [String: MetadataValue]
     let newMetadataFields: [MetadataFieldDefinition]
 }
 
-struct CollectionImporter {
+nonisolated struct CollectionImporter {
     nonisolated init() {}
 
     nonisolated func parseTable(_ data: Data) throws -> CSVImportTable {
@@ -277,11 +278,13 @@ struct CollectionImporter {
                 sourceIdentifier: sourceIdentifierColumn.map(rawValue(at:)),
                 metadata: metadata
             )
+            draft.stateWasExplicit = !rawState.isEmpty
             for rule in conditionalRules where rule.matches(headers: table.headers, row: row) {
                 switch rule.action {
                 case .status(let statusID):
                     guard validStatusIDs?.contains(statusID) != false else { continue }
                     draft.state = ItemState(rawValue: statusID)
+                    draft.stateWasExplicit = true
                 case .metadata(let fieldID, let value):
                     guard let field = existingByID[fieldID], let parsed = metadataValue(value.trimmingCharacters(in: .whitespacesAndNewlines), as: field.type, hint: field.name) else { continue }
                     draft.metadata[field.storageKey] = parsed

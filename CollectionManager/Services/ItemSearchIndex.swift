@@ -2,7 +2,7 @@ import Foundation
 
 /// Derived text only: no image bytes, source-provider payloads or persisted state.
 /// Rebuild when the selected items or locale change, never for each keypress.
-struct ItemSearchIndex: Sendable {
+nonisolated struct ItemSearchIndex: Sendable {
     private var textByID: [UUID: String] = [:]
 
     init(items: [CollectionItem] = []) { rebuild(items: items) }

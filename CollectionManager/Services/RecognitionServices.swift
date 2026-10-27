@@ -338,7 +338,7 @@ enum FoodProductMapper {
         }
         let strength = firstMatch(in: rawTitle, pattern: #"\b\d{1,2}(?:[.,]\d+)?\s*%"#)?.replacingOccurrences(of: " ", with: "") ?? formattedStrength(alcohol)
         var name = rawTitle
-        if let age { name = removingMatch(from: name, pattern: #"(?i)\b\d{1,3}\s*(?:[- ]?ročn[aá]|y\.?\s*o\.?|years?\s*old|ans?|a(?:ñ|n)os?|jahre?)\b"#) }
+        if age != nil { name = removingMatch(from: name, pattern: #"(?i)\b\d{1,3}\s*(?:[- ]?ročn[aá]|y\.?\s*o\.?|years?\s*old|ans?|a(?:ñ|n)os?|jahre?)\b"#) }
         if strength != nil { name = removingMatch(from: name, pattern: #"\b\d{1,2}(?:[.,]\d+)?\s*%"#) }
         if !brand.isEmpty {
             let escapedBrand = NSRegularExpression.escapedPattern(for: brand)
@@ -375,7 +375,7 @@ enum FoodProductMapper {
     }
 
     private static func normalizedPackageSize(_ value: String?, isSpirit: Bool) -> String? {
-        guard var value = value.map(cleaned), !value.isEmpty else { return nil }
+        guard var value = value.map({ cleaned($0) }), !value.isEmpty else { return nil }
         value = value.replacingOccurrences(of: #"(?i)(\d)\s*(ml|cl|l|g|kg)\b"#, with: "$1 $2", options: .regularExpression)
         if isSpirit, value.range(of: #"(?i)^\d+(?:[.,]\d+)?\s*g$"#, options: .regularExpression) != nil {
             value = value.replacingOccurrences(of: #"(?i)g$"#, with: "ml", options: .regularExpression)

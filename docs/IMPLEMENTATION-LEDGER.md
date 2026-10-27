@@ -83,3 +83,59 @@ reopen tests passed. Original share UI retained for this foundation commit;
 package lifecycle wrapper is staged infrastructure until transport integration.
 macOS unsigned UI runner was killed before connecting; ad-hoc signing retry is
 being diagnosed. This is not a successful UI or signed sharing result.
+
+Agent C ownership additionally includes `Services/TagUtilities.swift`,
+`Services/ItemThumbnailCache.swift`, `Views/ItemViews.swift` (ItemThumbnail only),
+and new thumbnail/date regression tests. Preserve persisted images and domain IDs;
+use bounded downsample cache. Other ItemViews edits remain coordinator-owned.
+
+## Deterministic sync acceptance and UI smoke ownership
+
+Agent C additionally owns new `CollectionManagerTests/CodecAcceptanceTests.swift`;
+Agent A owns codec source and `PersistenceTransportTests.swift`. Findings flow to A.
+Agent B now owns `CollectionManagerUITests/CollectionManagerUITests.swift` only,
+expanding actual smoke flows against test-isolated stores. Coordinator owns all
+project/scheme/signing changes. Mac UI runs may clear entitlements only as an
+explicit command-line test override; shipped entitlements remain unchanged.
+
+## Kit startup reentrancy correction (Agent B)
+
+Agent B exclusively owns kit `CloudKitSyncEnginePool.swift` and new
+`PoolStartup*` tests to coalesce concurrent pool.start/shutdown across actor
+suspensions. Preserve APIs and durable barrier; coordinator tests/commits/pushes
+kit before advancing the remote pin. No agent Git mutations.
+
+## Off-main query preparation (Agent C)
+
+Agent C owns new `Services/ItemQueryProcessor.swift`, new query regression tests,
+and nonisolated value-type annotations in `Domain/Models.swift` only (no stored
+model/schema changes). Acceptance: background search/filter/sort preserves existing
+ordering/nil/tie semantics and cancellation. Coordinator alone wires AppStore,
+using generation checks so stale queries/collection results never publish.
+
+Final handoff: Agent A froze codec/schema/startup and PersistenceTransport files;
+coordinator owns those now. Agent A temporarily retains Repositories.swift and
+new persistence validation tests to enforce typed JSON validation and configured
+status rules before any batch writes. V1 remains unchanged.
+
+## Final review corrections
+
+All domain/schema/code writers are paused; coordinator owns integrated files.
+Agent B is limited to actual simulator UI test selector corrections. The final
+source keeps missing legacy zones recoverable rather than recreating them.
+Explicit new-collection intent is durable in the existing outbox. Confirmed
+leave/revocation suspends only the affected shared locator and keeps local data;
+queued engine writes are filtered by current stored permissions too. Baseline
+candidate review is an explicit user action, not an automatic retry.
+Kit main `5e9a09d7af84f4be9c7df7908c13c9ccfd35af82` is pushed and pinned remotely.
+
+Agent C final measurement ownership: new PerformanceImageMemoryTests.swift and
+PERFORMANCE.md only, for actual host image-heavy seed/fetch/thumbnail memory at
+1k/10k and bounded50k stress. No app/UI/source/project writes. Run tests only
+when coordinator hands the app test-run slot back (simulator UI currently active).
+
+Source freeze gate:81 macOS unit tests passed,0 failures/skips, including both
+host performance datasets; earlier iPhone77 unit +2 UI tests passed. All source
+writers are stopped. Agent B is executing existing iPad smoke tests without edits.
+Integration commit is followed by a genuinely fresh remote clone and final
+platform builds/tests; production/account/distribution gates stay open.

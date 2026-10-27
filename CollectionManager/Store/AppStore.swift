@@ -7,6 +7,8 @@ import SwiftData
     private var repository: CollectionRepository?
     private var backgroundRepository: CollectionBackgroundRepository?
     private var modelContext: ModelContext?
+    private var cloudService: CloudKitSharingService?
+    private var localChangesObservation: NSObjectProtocol?
     var sharingSession: CollectionSharingSession?
     let editSessions = CollectionEditSessions()
     var collections: [CollectionModel] = []
@@ -18,6 +20,8 @@ import SwiftData
     var selectedBrand: String? { didSet { rebuildVisibleItems() } }
     var itemSort: ItemSort = .updatedDescending { didSet { rebuildVisibleItems() } }
     private var searchIndex = ItemSearchIndex()
+    private var queryTask: Task<[CollectionItem], Error>?
+    private var queryGeneration: UInt64 = 0
     private(set) var visibleItems: [CollectionItem] = []
     private(set) var brands: [String] = []
     private(set) var hasDateTags = false
@@ -38,8 +42,32 @@ import SwiftData
     var syncState: CollectionSyncState = .idle
     var syncError: String?
     var pendingSyncCount = 0
+    var legacyReviewCount = 0
     private var syncRequestedWhileSyncing = false
-    func configure(context: ModelContext, container: ModelContainer) { guard repository == nil else { return }; modelContext = context; repository = CollectionRepository(context: context); backgroundRepository = CollectionBackgroundRepository(container: container) }
+    func configure(context: ModelContext, container: ModelContainer, failureInjector: ((RepositoryFailurePoint) throws -> Void)? = nil) {
+        guard repository == nil else { return }
+        modelContext = context
+        let repository = CollectionRepository(context: context)
+        repository.failureInjector = failureInjector
+        self.repository = repository
+        backgroundRepository = CollectionBackgroundRepository(container: container)
+        if CloudKitSharingService.isAvailable {
+            cloudService = CloudKitSharingService(modelContainer: container)
+            localChangesObservation = NotificationCenter.default.addObserver(forName: .collectionManagerLocalChanges, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in await self?.syncCollections() }
+            }
+        }
+    }
+
+    func beginIntentOperation() throws {
+        guard repository != nil else { throw RepositoryError.validation("Your library is unavailable. Open Collection Manager to recover the persistent store.") }
+        persistenceError = nil
+        itemActionError = nil
+    }
+
+    func checkIntentOperation() throws {
+        if let failure = persistenceError ?? itemActionError { throw RepositoryError.validation(failure) }
+    }
     func load() { loadCollections(); loadSelectedCollection() }
     func loadCollections() {
         do {
@@ -81,20 +109,21 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription }
     }
-    func select(_ collectionID: UUID?) { guard let collectionID, let collection = collections.first(where: { $0.id == collectionID }), selectedCollection?.id != collectionID else { return }; selectedCollection = collection; selectedState = nil; selectedBrand = nil; itemSort = .updatedDescending; Task { await loadSelectedCollectionInBackground() } }
-    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) {
-        do { try repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); reportPersistenceFailure(); loadCollections(); loadSelectedCollection()
-        } catch { persistenceError = error.localizedDescription }
+    func select(_ collectionID: UUID?) { guard let collectionID, let collection = collections.first(where: { $0.id == collectionID }), selectedCollection?.id != collectionID else { return }; selectedCollection = collection; items = []; webSyncs = []; selectedState = nil; selectedBrand = nil; itemSort = .updatedDescending; Task { await loadSelectedCollectionInBackground() } }
+    @discardableResult func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) -> Bool {
+        do { guard let repository else { return false }; try repository.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); loadCollections(); loadSelectedCollection(); return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
-    func updateCollection(_ collection: CollectionModel) {
-        do { try repository?.updateCollection(collection); reportPersistenceFailure(); loadCollections(); loadSelectedCollection()
-        } catch { persistenceError = error.localizedDescription }
+    @discardableResult func updateCollection(_ collection: CollectionModel) -> Bool {
+        do { guard let repository else { return false }; try repository.updateCollection(collection); loadCollections(); loadSelectedCollection(); return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
-    func addMetadataFields(_ fields: [MetadataFieldDefinition]) {
-        guard var collection = selectedCollection, collection.role.canEdit, !fields.isEmpty else { return }
+    @discardableResult func addMetadataFields(_ fields: [MetadataFieldDefinition]) -> Bool {
+        guard !fields.isEmpty else { return true }
+        guard var collection = selectedCollection, collection.role.canEdit else { return false }
         let existingIDs = Set(collection.metadataFields.map(\.id))
         collection.metadataFields.append(contentsOf: fields.filter { !existingIDs.contains($0.id) })
-        updateCollection(collection)
+        return updateCollection(collection)
     }
     func deleteCollection(_ collection: CollectionModel) async {
         do {
@@ -128,10 +157,11 @@ import SwiftData
             }
             let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
             guard try repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { reportPersistenceFailure(); return nil }
-            if collectionID == selectedCollection?.id { items.insert(item, at: 0) }
-            indexInSpotlight([item])
+            let saved = try repository?.item(id: item.id) ?? item
+            if collectionID == selectedCollection?.id { items.insert(saved, at: 0) }
+            indexInSpotlight([saved])
             Task { await syncCollections() }
-            return item
+            return saved
 
         } catch { persistenceError = error.localizedDescription; return nil }
     }
@@ -145,9 +175,9 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; return 0 }
     }
-    func importDrafts(_ drafts: [ImportDraft]) {
+    @discardableResult func importDrafts(_ drafts: [ImportDraft]) -> Bool {
         do {
-            guard let repository, let collection = selectedCollection else { return }
+            guard let repository, let collection = selectedCollection else { return false }
             let accepted = drafts.filter { !collection.barcodeRequired || $0.barcode != nil }
             if accepted.count != drafts.count {
                 itemActionError = "Some imported items were skipped because this collection requires a barcode."
@@ -157,8 +187,17 @@ import SwiftData
             }
             try repository.importDrafts(entries, collectionID: collection.id)
             loadSelectedCollection()
+            return true
 
-        } catch { persistenceError = error.localizedDescription }
+        } catch { persistenceError = error.localizedDescription; return false }
+    }
+    @discardableResult func importNewDrafts(_ drafts: [ImportDraft], allowsDuplicates: Bool) -> Bool {
+        guard let repository, let collectionID = selectedCollection?.id else { return false }
+        do {
+            try repository.importNewDrafts(drafts, collectionID: collectionID, allowsDuplicates: allowsDuplicates)
+            loadSelectedCollection()
+            return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
     func deduplicateItems() -> Int {
         do {
@@ -189,7 +228,9 @@ import SwiftData
                 itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
                 return false
             }
-            guard let repository else { return false }; try repository.updateItem(item, previousState: previousState); replaceItem(item); indexInSpotlight([item]); return true
+            guard let repository else { return false }; try repository.updateItem(item, previousState: previousState)
+            guard let saved = try repository.item(id: item.id) else { throw RepositoryError.fetchFailed }
+            replaceItem(saved); indexInSpotlight([saved]); return true
 
         } catch { persistenceError = error.localizedDescription; return false }
     }
@@ -248,13 +289,13 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return 0 }
     }
-    func saveWebSync(_ sync: WebSyncRecord) {
-        do { try repository?.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
-        } catch { persistenceError = error.localizedDescription }
+    @discardableResult func saveWebSync(_ sync: WebSyncRecord) -> Bool {
+        do { guard let repository else { return false }; try repository.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
-    func updateWebSync(_ sync: WebSyncRecord) {
-        do { try repository?.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
-        } catch { persistenceError = error.localizedDescription }
+    @discardableResult func updateWebSync(_ sync: WebSyncRecord) -> Bool {
+        do { guard let repository else { return false }; try repository.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
     func deleteWebSync(_ sync: WebSyncRecord) {
         do { try repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
@@ -267,50 +308,63 @@ import SwiftData
         WebSyncScheduler.schedule(context: modelContext)
     }
     func syncCollections() async {
+        guard let repository, let cloudService else { return }
+        guard syncState != .syncing else { syncRequestedWhileSyncing = true; return }
+        syncState = .syncing
+        syncError = nil
         do {
-            guard let repository, let backgroundRepository else { return }
-            guard CloudKitSharingService.isAvailable else { return }
-            guard syncState != .syncing else {
-                syncRequestedWhileSyncing = true
-                return
-            }
-            syncState = .syncing; syncError = nil
-            let service = CloudKitSharingService()
-            let localCollections = try repository.collections()
-            let mutations = try repository.pendingMutations().map { CloudSyncMutation(id: $0.id, collectionID: $0.collectionID, itemID: $0.itemID, recordName: $0.recordName, recordType: $0.recordType, operation: $0.operation) }
-            let payload = try await backgroundRepository.syncPayload(collectionIDs: localCollections.map(\.id))
-            let mutationIDs = Set(mutations.map(\.id))
-        do {
-                let result = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
-                // Remove the mutations that were actually written before merging.
-                // Anything the push skipped stays queued, so the merge still treats
-                // it as a tombstone and a pending delete cannot be resurrected by
-                // the snapshot. The merge may also enqueue recovery mutations for
-                // data previously routed to a participant's private duplicate, and
-                // those must survive for the next shared-zone sync.
-                try repository.removeMutations(withIDs: result.appliedMutationIDs)
-                let notificationChanges = try repository.merge(result.snapshots)
-                LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
-                if try repository.pendingMutations().isEmpty == false {
-                    syncRequestedWhileSyncing = true
-                }
-                try repository.setSyncState(collectionID: selectedCollection?.id ?? localCollections.first?.id ?? UUID(), state: .idle, lastSyncedAt: .now)
-                syncState = .idle; pendingSyncCount = 0; loadCollections(); await loadSelectedCollectionInBackground()
-        } catch {
-            syncState = .error; syncError = error.localizedDescription
-            try repository.markMutations(withIDs: mutationIDs, error: error)
+            try await cloudService.synchronize()
+            sharingSession = cloudService.sharingSession
+            legacyReviewCount = cloudService.legacyReviewCount
+            if cloudService.needsContinuation { syncRequestedWhileSyncing = true }
             pendingSyncCount = try repository.pendingMutations().count
-            if let collectionID = selectedCollection?.id { try repository.setSyncState(collectionID: collectionID, state: .error, error: error.localizedDescription) }
+            syncState = .idle
+            loadCollections()
+            await loadSelectedCollectionInBackground()
+        } catch {
+            syncState = .error
+            legacyReviewCount = cloudService.legacyReviewCount
+            syncError = CollectionSharingSession.message(for: error)
+            do { pendingSyncCount = try repository.pendingMutations().count }
+            catch { persistenceError = error.localizedDescription }
         }
         if syncRequestedWhileSyncing {
             syncRequestedWhileSyncing = false
-            await syncCollections()
+            // One coalesced follow-up, scheduled outside the current stack.
+            Task { await self.syncCollections() }
         }
-
-        } catch { persistenceError = error.localizedDescription }
     }
-    func acceptShare(from url: URL) async { do { try await CloudKitSharingService().acceptShare(from: url); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
-    func acceptShare(metadata: CKShare.Metadata) async { do { try await CloudKitSharingService().acceptShare(metadata: metadata); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
+
+    @discardableResult func acceptShare(from url: URL) async -> Bool {
+        guard let cloudService else { syncError = SharingError.unavailable.localizedDescription; return false }
+        do {
+            try await cloudService.accept(url: url)
+            sharingSession = cloudService.sharingSession
+            await syncCollections()
+            return true
+        } catch { syncState = .error; syncError = CollectionSharingSession.message(for: error); return false }
+    }
+
+    @discardableResult func acceptShare(metadata: CKShare.Metadata) async -> Bool {
+        guard let cloudService else { syncError = SharingError.unavailable.localizedDescription; return false }
+        do {
+            try await cloudService.accept(metadata)
+            sharingSession = cloudService.sharingSession
+            await syncCollections()
+            return true
+        } catch { syncState = .error; syncError = CollectionSharingSession.message(for: error); return false }
+    }
+    func legacyCandidates(limit: Int = 50, offset: Int = 0) async throws -> [CollectionLegacyCandidate] {
+        guard let cloudService else { throw SharingError.unavailable }
+        return try await cloudService.legacyCandidates(limit: limit, offset: offset)
+    }
+
+    func authorizeLegacyUpload(_ id: UUID) async throws {
+        guard let cloudService else { throw SharingError.unavailable }
+        try await cloudService.authorizeLegacyUpload(id)
+        await syncCollections()
+    }
+
     // MARK: App Intents support
 
     /// Collections for App Intents, which can run before any window has
@@ -406,6 +460,8 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; return [] }
     }
+    func refreshLocale() { rebuildDerivedItemState() }
+
     private func rebuildDerivedItemState() {
         searchIndex.rebuild(items: items)
         brands = Array(Set(items.lazy.map(\.brand).filter { !$0.isEmpty })).sorted()
@@ -424,23 +480,23 @@ import SwiftData
         persistenceError = repository?.lastPersistenceError?.localizedDescription
     }
     private func rebuildVisibleItems() {
-        let query = ItemSearchIndex.normalizedQuery(searchText)
-        let filtered = items.filter { item in
-            guard selectedState == nil || item.state == selectedState, selectedBrand == nil || item.brand == selectedBrand else { return false }
-            guard !query.isEmpty else { return true }
-            return searchIndex.matches(itemID: item.id, normalizedQuery: query)
-        }
-        switch itemSort {
-        case .updatedDescending: visibleItems = filtered.sorted { $0.updatedAt > $1.updatedAt }
-        case .titleAscending: visibleItems = filtered.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-        case .dateAscending: visibleItems = filtered.sorted { dateSorts($0, before: $1, ascending: true) }
-        case .dateDescending: visibleItems = filtered.sorted { dateSorts($0, before: $1, ascending: false) }
-        case .metadata(let fieldID, let direction):
-            guard let field = selectedCollection?.metadataFields.first(where: { $0.id == fieldID }) else {
-                visibleItems = filtered.sorted { $0.updatedAt > $1.updatedAt }
-                return
+        queryTask?.cancel()
+        queryGeneration &+= 1
+        let generation = queryGeneration
+        let request = ItemQueryRequest(items: items, searchIndex: searchIndex,
+            searchText: searchText, selectedState: selectedState, selectedBrand: selectedBrand,
+            sort: itemSort, metadataFields: selectedCollection?.metadataFields ?? [])
+        let worker = Task.detached(priority: .userInitiated) { try ItemQueryProcessor.evaluate(request) }
+        queryTask = worker
+        Task { [weak self] in
+            do {
+                let result = try await worker.value
+                guard let self, self.queryGeneration == generation else { return }
+                self.visibleItems = result
+            } catch {
+                // A superseded query keeps the last visible result until the
+                // newest generation publishes; cancellation is not a save.
             }
-            visibleItems = filtered.sorted { metadataSorts($0, before: $1, field: field, direction: direction) }
         }
     }
     private func replaceItem(_ item: CollectionItem) {
@@ -454,88 +510,6 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription }
     }
-    private func dateSorts(_ lhs: CollectionItem, before rhs: CollectionItem, ascending: Bool) -> Bool {
-        switch (lhs.earliestDateTag, rhs.earliestDateTag) {
-        case (nil, nil): return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-        case (nil, _): return false
-        case (_, nil): return true
-        case let (left?, right?): return ascending ? left < right : left > right
-        }
-    }
-    private func metadataSorts(_ lhs: CollectionItem, before rhs: CollectionItem, field: MetadataFieldDefinition, direction: SortDirection) -> Bool {
-        let left = lhs.metadata[field.storageKey]
-        let right = rhs.metadata[field.storageKey]
-        switch field.type {
-        case .text:
-            return textValuesSort(metadataText(left), metadataText(right), lhs: lhs, rhs: rhs, direction: direction)
-        case .number:
-            return valuesSort(metadataNumber(left), metadataNumber(right), lhs: lhs, rhs: rhs, direction: direction)
-        case .date:
-            return valuesSort(metadataDate(left), metadataDate(right), lhs: lhs, rhs: rhs, direction: direction)
-        case .boolean:
-            return valuesSort(metadataBoolean(left), metadataBoolean(right), lhs: lhs, rhs: rhs, direction: direction)
-        case .color:
-            return textValuesSort(metadataText(left), metadataText(right), lhs: lhs, rhs: rhs, direction: direction)
-        }
-    }
-    private func valuesSort<Value: Comparable>(_ left: Value?, _ right: Value?, lhs: CollectionItem, rhs: CollectionItem, direction: SortDirection) -> Bool {
-        switch (left, right) {
-        case (nil, nil): return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-        case (nil, _): return false
-        case (_, nil): return true
-        case let (left?, right?):
-            if left == right { return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
-            return direction == .ascending ? left < right : left > right
-        }
-    }
-    private func textValuesSort(_ left: String?, _ right: String?, lhs: CollectionItem, rhs: CollectionItem, direction: SortDirection) -> Bool {
-        switch (left, right) {
-        case (nil, nil): return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-        case (nil, _): return false
-        case (_, nil): return true
-        case let (left?, right?):
-            let comparison = left.localizedStandardCompare(right)
-            if comparison == .orderedSame { return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
-            return direction == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
-    }
-    private func metadataText(_ value: MetadataValue?) -> String? {
-        guard let value else { return nil }
-        let text = value.displayValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
-    }
-    private func metadataNumber(_ value: MetadataValue?) -> Double? {
-        switch value {
-        case .integer(let number): return Double(number)
-        case .decimal(let number): return number
-        case .string(let text): return Self.metadataNumberFormatter.number(from: text)?.doubleValue
-        default: return nil
-        }
-    }
-    private func metadataDate(_ value: MetadataValue?) -> Date? {
-        if case .date(let date)? = value { return date }
-        return nil
-    }
-    private func metadataBoolean(_ value: MetadataValue?) -> Int? {
-        switch value {
-        case .boolean(let boolean): return boolean ? 1 : 0
-        case .integer(let number): return number == 0 ? 0 : 1
-        case .decimal(let number): return number == 0 ? 0 : 1
-        case .string(let text):
-            switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-            case "true", "yes", "y", "1", "on": return 1
-            case "false", "no", "n", "0", "off": return 0
-            default: return nil
-            }
-        default: return nil
-        }
-    }
-    private static let metadataNumberFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = .current
-        return formatter
-    }()
     private static func normalizedText(_ value: String) -> String { value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
     private static func words(_ value: String) -> Set<String> { Set(normalizedText(value).split(separator: " ").map(String.init)) }
 }

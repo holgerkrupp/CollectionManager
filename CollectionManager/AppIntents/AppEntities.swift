@@ -133,16 +133,25 @@ struct CollectionEntityQuery: EntityStringQuery {
     @Dependency private var store: AppStore
 
     @MainActor func entities(for identifiers: [UUID]) async throws -> [CollectionEntity] {
+        try store.beginIntentOperation()
         let wanted = Set(identifiers)
-        return store.intentCollections().filter { wanted.contains($0.id) }.map(CollectionEntity.init)
+        let result = store.intentCollections().filter { wanted.contains($0.id) }.map(CollectionEntity.init)
+        try store.checkIntentOperation()
+        return result
     }
 
     @MainActor func entities(matching string: String) async throws -> [CollectionEntity] {
-        store.intentCollections().filter { $0.name.localizedStandardContains(string) }.map(CollectionEntity.init)
+        try store.beginIntentOperation()
+        let result = store.intentCollections().filter { $0.name.localizedStandardContains(string) }.map(CollectionEntity.init)
+        try store.checkIntentOperation()
+        return result
     }
 
     @MainActor func suggestedEntities() async throws -> [CollectionEntity] {
-        store.intentCollections().map(CollectionEntity.init)
+        try store.beginIntentOperation()
+        let result = store.intentCollections().map(CollectionEntity.init)
+        try store.checkIntentOperation()
+        return result
     }
 }
 
@@ -150,20 +159,29 @@ struct ItemEntityQuery: EntityStringQuery {
     @Dependency private var store: AppStore
 
     @MainActor func entities(for identifiers: [UUID]) async throws -> [ItemEntity] {
-        store.itemEntities(for: identifiers.compactMap(store.item(id:)))
+        try store.beginIntentOperation()
+        let result = store.itemEntities(for: identifiers.compactMap(store.item(id:)))
+        try store.checkIntentOperation()
+        return result
     }
 
     @MainActor func entities(matching string: String) async throws -> [ItemEntity] {
+        try store.beginIntentOperation()
         let matches = store.intentItems().filter { item in
             ([item.title, item.brand, item.variant, item.barcode?.value ?? ""] + item.tags)
                 .contains { $0.localizedStandardContains(string) }
         }
-        return store.itemEntities(for: matches)
+        let result = store.itemEntities(for: matches)
+        try store.checkIntentOperation()
+        return result
     }
 
     @MainActor func suggestedEntities() async throws -> [ItemEntity] {
+        try store.beginIntentOperation()
         let recent = store.intentItems().sorted { $0.updatedAt > $1.updatedAt }.prefix(20)
-        return store.itemEntities(for: Array(recent))
+        let result = store.itemEntities(for: Array(recent))
+        try store.checkIntentOperation()
+        return result
     }
 }
 
@@ -188,7 +206,9 @@ extension ItemEntityQuery: IndexedEntityQuery {
     }
 
     func reindexAllEntities(indexDescription: CSSearchableIndexDescription) async throws {
+        try await store.beginIntentOperation()
         await store.updateSpotlightIndex()
+        try await store.checkIntentOperation()
     }
 }
 
@@ -207,6 +227,7 @@ extension AppStore {
         let index = CSSearchableIndex.default()
         let collections = intentCollections().map(CollectionEntity.init)
         let items = itemEntities(for: intentItems())
+        guard persistenceError == nil else { return }
         try? await index.deleteAppEntities(ofType: CollectionEntity.self)
         try? await index.deleteAppEntities(ofType: ItemEntity.self)
         try? await index.indexAppEntities(collections)

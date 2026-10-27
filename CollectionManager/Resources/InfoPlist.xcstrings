@@ -1,0 +1,30 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleName": {
+      "comment": "Bundle name",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "CollectionManager"
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription": {
+      "comment": "Camera permission prompt shown before barcode scanning or taking an item photo. Existing library photos are selected with the system photo picker.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection Manager uses the camera to scan barcodes and take photos for your items."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

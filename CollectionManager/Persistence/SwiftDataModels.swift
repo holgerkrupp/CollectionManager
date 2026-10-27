@@ -86,6 +86,6 @@ typealias WebSyncRecord = CollectionManagerSchemaV1.WebSyncRecord
 typealias EventRecord = CollectionManagerSchemaV1.EventRecord
 
 enum CollectionManagerMigrationPlan: SchemaMigrationPlan {
-    static let schemas: [any VersionedSchema.Type] = [CollectionManagerSchemaV1.self]
-    static let stages: [MigrationStage] = []
+    static let schemas: [any VersionedSchema.Type] = [CollectionManagerSchemaV1.self, CollectionManagerSchemaV2.self]
+    static let stages: [MigrationStage] = [.lightweight(fromVersion: CollectionManagerSchemaV1.self, toVersion: CollectionManagerSchemaV2.self)]
 }

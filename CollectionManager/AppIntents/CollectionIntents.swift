@@ -91,7 +91,9 @@ struct OpenCollectionIntent: OpenIntent {
     @Dependency private var store: AppStore
 
     @MainActor func perform() async throws -> some IntentResult {
+        try store.beginIntentOperation()
         store.open(collectionID: target.id)
+        try store.checkIntentOperation()
         return .result()
     }
 }
@@ -106,7 +108,9 @@ struct OpenItemIntent: OpenIntent {
     @Dependency private var store: AppStore
 
     @MainActor func perform() async throws -> some IntentResult {
+        try store.beginIntentOperation()
         store.open(itemID: target.id)
+        try store.checkIntentOperation()
         return .result()
     }
 }
@@ -138,16 +142,19 @@ struct AddItemIntent: AppIntent {
     }
 
     @MainActor func perform() async throws -> some IntentResult & ReturnsValue<ItemEntity> & ProvidesDialog {
+        try store.beginIntentOperation()
         guard let model = store.intentCollections().first(where: { $0.id == collection.id }), model.role.canEdit else {
             throw CollectionIntentError.notEditable(collection.name)
         }
-        let state = status?.state ?? model.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted
+        let state = status?.state ?? ItemState(rawValue: model.defaultStatusID)
         guard model.statuses.contains(where: { $0.id == state.rawValue }) else {
             throw CollectionIntentError.statusUnavailable(status?.name ?? state.label, model.name)
         }
         guard let item = store.addItem(title: itemTitle, brand: brand ?? "", variant: "", description: "", state: state, quantity: quantity, tags: tags ?? [], collectionID: model.id) else {
+            try store.checkIntentOperation()
             throw CollectionIntentError.duplicateItem(itemTitle, model.name)
         }
+        try store.checkIntentOperation()
         return .result(value: ItemEntity(item: item, collection: model), dialog: "Added \(item.title) to \(model.name).")
     }
 }
@@ -180,10 +187,17 @@ struct SetItemStatusIntent: AppIntent, UndoableIntent {
     }
 
     @MainActor func perform() async throws -> some IntentResult & ReturnsValue<ItemEntity> & ProvidesDialog {
-        guard item.stateID != status.id else {
-            return .result(value: item, dialog: "\(item.title) is already \(status.name).")
+        try store.beginIntentOperation()
+        guard let current = store.item(id: item.id) else {
+            try store.checkIntentOperation()
+            throw CollectionIntentError.itemNotFound
+        }
+        if current.state.rawValue == status.id {
+            try store.checkIntentOperation()
+            return .result(value: store.itemEntities(for: [current]).first ?? item, dialog: "\(current.title) is already \(status.name).")
         }
         let previous = store.setState(status.state, forItemIDs: [item.id])
+        try store.checkIntentOperation()
         guard !previous.isEmpty else {
             guard let collection = store.intentCollections().first(where: { $0.id == item.collectionID }) else { throw CollectionIntentError.itemNotFound }
             if !collection.role.canEdit { throw CollectionIntentError.notEditable(collection.name) }
@@ -191,6 +205,7 @@ struct SetItemStatusIntent: AppIntent, UndoableIntent {
         }
         registerUndo(restoring: previous, in: store)
         let updated = store.item(id: item.id).flatMap { store.itemEntities(for: [$0]).first } ?? item
+        try store.checkIntentOperation()
         return .result(value: updated, dialog: "Moved \(item.title) to \(status.name).")
     }
 }
@@ -213,8 +228,10 @@ struct SetStatusForItemsIntent: AppIntent, UndoableIntent {
     }
 
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        try store.beginIntentOperation()
         let previous = store.setState(status.state, forItemIDs: items.identifiers)
         registerUndo(restoring: previous, in: store)
+        try store.checkIntentOperation()
         return .result(dialog: "Moved \(previous.count) of \(items.count) items to \(status.name).")
     }
 }
@@ -232,6 +249,7 @@ struct DeleteItemIntent: AppIntent {
     @Dependency private var store: AppStore
 
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        try store.beginIntentOperation()
         guard let model = store.item(id: item.id) else { throw CollectionIntentError.itemNotFound }
         if !systemConfirmsDeletion {
             try await requestConfirmation(dialog: "Delete \(item.title)? This can’t be undone.")
@@ -239,9 +257,11 @@ struct DeleteItemIntent: AppIntent {
         guard await store.deleteItem(model) else {
             // The error reaches the person through the intent; don't also
             // leave an alert waiting for the next time the app is opened.
+            try store.checkIntentOperation()
             store.itemActionError = nil
             throw CollectionIntentError.notEditable(item.collectionName)
         }
+        try store.checkIntentOperation()
         return .result(dialog: "Deleted \(item.title).")
     }
 
@@ -266,6 +286,7 @@ struct SyncCollectionsIntent: AppIntent, LongRunningIntent {
     @Dependency private var store: AppStore
 
     @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        try store.beginIntentOperation()
         guard CloudKitSharingService.isAvailable else { throw CollectionIntentError.iCloudUnavailable }
         progress.totalUnitCount = 1
         // A CloudKit round trip across many shared collections can outlast
@@ -277,6 +298,7 @@ struct SyncCollectionsIntent: AppIntent, LongRunningIntent {
         }
         progress.completedUnitCount = 1
         if let failure { throw CollectionIntentError.syncFailed(failure) }
+        try store.checkIntentOperation()
         return .result(dialog: "Your collections are up to date.")
     }
 }

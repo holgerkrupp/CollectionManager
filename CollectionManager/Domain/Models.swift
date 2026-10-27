@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct ItemState: RawRepresentable, Codable, Hashable, Identifiable, Sendable {
+nonisolated struct ItemState: RawRepresentable, Codable, Hashable, Identifiable, Sendable {
     let rawValue: String
 
     nonisolated init(rawValue: String) { self.rawValue = rawValue }
@@ -146,13 +146,36 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-struct Barcode: Hashable, Codable, Sendable {
+nonisolated struct Barcode: Hashable, Codable, Sendable {
     let value: String; let type: String
     nonisolated init?(rawValue: String, type: String = "EAN-13") {
         let digits = rawValue.filter(\.isNumber)
-        guard [8, 12, 13, 14].contains(digits.count), Self.hasValidCheckDigit(digits) else { return nil }
-        value = digits.count == 12 ? "0\(digits)" : digits
-        self.type = digits.count == 12 ? "UPC-A" : type
+        guard digits.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        let normalized: String
+        if type.uppercased() == "UPC-E", digits.count == 8 {
+            guard let expanded = Self.expandUPCE(digits), Self.hasValidCheckDigit(expanded) else { return nil }
+            normalized = "0" + expanded
+        } else {
+            guard [8, 12, 13, 14].contains(digits.count), Self.hasValidCheckDigit(digits) else { return nil }
+            normalized = digits.count == 12 ? "0\(digits)" : digits
+        }
+        value = normalized
+        self.type = type.uppercased() == "UPC-E" ? "UPC-E" : (digits.count == 12 ? "UPC-A" : type)
+    }
+
+    /// GS1 General Specifications 5.2.2.4.2: expand the zero-suppressed
+    /// GTIN-12 before validating its check digit. Never guess UPC-E for EAN-8.
+    nonisolated private static func expandUPCE(_ digits: String) -> String? {
+        let d = Array(digits)
+        guard d.count == 8, d[0] == "0" else { return nil }
+        let body: String
+        switch d[6] {
+        case "0", "1", "2": body = "0" + String(d[1...2]) + String(d[6]) + "0000" + String(d[3...5])
+        case "3": body = "0" + String(d[1...3]) + "00000" + String(d[4...5])
+        case "4": body = "0" + String(d[1...4]) + "00000" + String(d[5])
+        default: body = "0" + String(d[1...5]) + "0000" + String(d[6])
+        }
+        return body + String(d[7])
     }
 
     nonisolated private static func hasValidCheckDigit(_ digits: String) -> Bool {
@@ -166,12 +189,12 @@ struct Barcode: Hashable, Codable, Sendable {
     }
 }
 
-enum MetadataValue: Codable, Hashable, Sendable {
+nonisolated enum MetadataValue: Codable, Hashable, Sendable {
     case string(String), integer(Int), decimal(Double), boolean(Bool), date(Date), url(URL)
     var displayValue: String { switch self { case .string(let v): v; case .integer(let v): "\(v)"; case .decimal(let v): "\(v)"; case .boolean(let v): v ? "Yes" : "No"; case .date(let v): v.formatted(date: .abbreviated, time: .omitted); case .url(let v): v.absoluteString } }
 }
 
-enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
+nonisolated enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
     case text
     case number
     case date
@@ -191,7 +214,7 @@ enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var name: String
     var type: MetadataFieldType
@@ -316,7 +339,7 @@ struct CollectionSettingsPayload: Codable, Sendable {
     }
 }
 
-struct ProductSourceSnapshot: Hashable, Codable, Sendable {
+nonisolated struct ProductSourceSnapshot: Hashable, Codable, Sendable {
     static let currentSchemaVersion = 1
     static let maximumPayloadBytes = 128_000
 
@@ -381,7 +404,7 @@ struct ProductSourceSnapshot: Hashable, Codable, Sendable {
     }
 }
 
-struct ProductSourceField: Identifiable, Hashable, Sendable {
+nonisolated struct ProductSourceField: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let path: String
@@ -389,12 +412,12 @@ struct ProductSourceField: Identifiable, Hashable, Sendable {
     let source: String
 }
 
-struct CollectionItem: Identifiable, Hashable, Sendable {
+nonisolated struct CollectionItem: Identifiable, Hashable, Sendable {
     let id: UUID; let collectionID: UUID; var title: String; var brand: String; var variant: String; var itemDescription: String; var state: ItemState; var quantity: Int; var barcode: Barcode?; var createdAt: Date; var updatedAt: Date; var consumedAt: Date?; var tags: [String]; var metadata: [String: MetadataValue]; var imageSystemName: String; var imageData: Data?; var importSourceKey: String?; var sourceSnapshot: ProductSourceSnapshot? = nil; var dateTags: [String: Date] = [:]; var ratings: [ItemRating] = []; var comments: [ItemComment] = []
     var earliestDateTag: Date? { dateTags.values.min() }
 }
 
-struct ItemRating: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct ItemRating: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let itemID: UUID
     let participantID: String
@@ -403,7 +426,7 @@ struct ItemRating: Identifiable, Hashable, Codable, Sendable {
     var updatedAt: Date
 }
 
-struct ItemComment: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct ItemComment: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let itemID: UUID
     let participantID: String
@@ -452,7 +475,7 @@ struct CollectionProductMatch: Identifiable, Sendable {
     let matchedBy: [String]
 }
 
-enum SortDirection: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum SortDirection: String, CaseIterable, Identifiable, Sendable {
     case ascending
     case descending
 
@@ -460,7 +483,7 @@ enum SortDirection: String, CaseIterable, Identifiable, Sendable {
     var label: String { rawValue.capitalized }
 }
 
-enum ItemSort: Hashable, Sendable {
+nonisolated enum ItemSort: Hashable, Sendable {
     case updatedDescending
     case titleAscending
     case dateAscending

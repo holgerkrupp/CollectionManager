@@ -3,6 +3,7 @@ import SwiftUI
 struct OnboardingView: View {
     let onFinish: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var page = 0
 
     private let pages: [OnboardingPage] = [
@@ -18,22 +19,26 @@ struct OnboardingView: View {
                 Spacer()
                 if page < pages.count - 1 { Button("Skip") { onFinish() }.font(.subheadline.weight(.medium)) }
             }
-            .frame(height: 24)
 
             TabView(selection: $page) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                    ScrollView {
                     VStack(spacing: 24) {
                         Image(systemName: page.systemImage)
                             .font(.system(size: 64, weight: .semibold))
                             .foregroundStyle(page.tint)
                             .frame(width: 136, height: 136)
                             .background(page.tint.opacity(0.12), in: Circle())
+                            .accessibilityHidden(true)
                         VStack(spacing: 12) {
                             Text(page.title).font(.largeTitle.bold()).multilineTextAlignment(.center)
+                                .accessibilityAddTraits(.isHeader)
                             Text(page.message).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
                         }
                     }
                     .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    }
                     .tag(index)
                 }
             }
@@ -42,7 +47,7 @@ struct OnboardingView: View {
             #endif
 
             Button(action: advance) {
-                Text(page == pages.count - 1 ? "Get Started" : "Next")
+                Text(page == pages.count - 1 ? LocalizedStringKey("Get Started") : LocalizedStringKey("Next"))
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -56,13 +61,15 @@ struct OnboardingView: View {
     }
 
     private func advance() {
-        if page == pages.count - 1 { onFinish() } else { withAnimation { page += 1 } }
+        if page == pages.count - 1 { onFinish() }
+        else if reduceMotion { page += 1 }
+        else { withAnimation { page += 1 } }
     }
 }
 
 private struct OnboardingPage {
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
     let systemImage: String
     let tint: Color
 }

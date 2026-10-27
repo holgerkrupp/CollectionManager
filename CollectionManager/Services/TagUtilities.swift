@@ -28,6 +28,13 @@ enum TagUtilities {
     static func dateValue(for tag: String) -> Date? {
         let value = tag.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
+        // Every configured POSIX/Gregorian format round-trips using ASCII
+        // digits and these separators. Reject ordinary text tags before
+        // allocating up to ten formatters. Do not restrict length: yyyy also
+        // round-trips years beyond four digits in existing stores.
+        guard value.utf8.allSatisfy({ byte in
+            (byte >= 48 && byte <= 57) || byte == 45 || byte == 46 || byte == 47
+        }) else { return nil }
         for format in dateFormats {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")

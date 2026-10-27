@@ -1,9 +1,1599 @@
 {
-  "version" : "1.0",
-  "sourceLanguage" : "en",
-  "strings" : {
-    "Your library needs attention" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Your library needs attention" } } } },
-    "Opening your library…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Opening your library…" } } } },
-    "Export store copy" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Export store copy" } } } }
-  }
+  "sourceLanguage": "en",
+  "strings": {
+    "": {
+      "extractionState": "manual"
+    },
+    "%.1f / 5 · %lld rating%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$.1f / 5 · %2$lld rating%3$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@": {
+      "extractionState": "manual"
+    },
+    "%@ details": {
+      "extractionState": "manual"
+    },
+    "%@ is already %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ is already %2$@."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@ snapshot from %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ snapshot from %2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@ · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ · %2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@ · %lld objects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ · %2$lld objects"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@, %@ in %@. Matched by %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@, %2$@ in %3$@. Matched by %4$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%@:": {
+      "extractionState": "manual"
+    },
+    "%lld": {
+      "extractionState": "manual"
+    },
+    "%lld %@ a title, brand and variant that another row or an existing item already uses.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld %2$@ a title, brand and variant that another row or an existing item already uses."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld %@ not imported.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld %2$@ not imported."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld %@ will be created.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld %2$@ will be created."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld collaborator comment%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld collaborator comment%2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld collections": {
+      "extractionState": "manual"
+    },
+    "%lld data %@ · %lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld data %2$@ · %3$lld %4$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld item%@ selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld item%2$@ selected"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld items": {
+      "extractionState": "manual"
+    },
+    "%lld of %lld selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld of %2$lld selected"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld out of 5 stars": {
+      "extractionState": "manual"
+    },
+    "%lld row%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld row%2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "%lld unsaved change%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld unsaved change%2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "1": {
+      "extractionState": "manual"
+    },
+    "API key": {
+      "extractionState": "manual"
+    },
+    "About": {
+      "extractionState": "manual"
+    },
+    "Account": {
+      "extractionState": "manual"
+    },
+    "Action": {
+      "extractionState": "manual"
+    },
+    "Add": {
+      "extractionState": "manual"
+    },
+    "Add ${itemTitle} to ${collection}": {
+      "extractionState": "manual"
+    },
+    "Add Item": {
+      "extractionState": "manual"
+    },
+    "Add Items with Siri": {
+      "extractionState": "manual"
+    },
+    "Add a comment for collaborators": {
+      "extractionState": "manual"
+    },
+    "Add a field to collect extra details on every item.": {
+      "extractionState": "manual"
+    },
+    "Add a new item to this collection": {
+      "extractionState": "manual"
+    },
+    "Add a source to keep this collection current.": {
+      "extractionState": "manual"
+    },
+    "Add comment": {
+      "extractionState": "manual"
+    },
+    "Add conditional rule": {
+      "extractionState": "manual"
+    },
+    "Add item": {
+      "extractionState": "manual"
+    },
+    "Add items your way": {
+      "extractionState": "manual"
+    },
+    "Add item…": {
+      "extractionState": "manual"
+    },
+    "Add merged tag": {
+      "extractionState": "manual"
+    },
+    "Add metadata field": {
+      "extractionState": "manual"
+    },
+    "Add new items": {
+      "extractionState": "manual"
+    },
+    "Add new objects": {
+      "extractionState": "manual"
+    },
+    "Add rule": {
+      "extractionState": "manual"
+    },
+    "Add status": {
+      "extractionState": "manual"
+    },
+    "Added %@ to %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Added %1$@ to %2$@."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Adding": {
+      "extractionState": "manual"
+    },
+    "Adds an item to one of your collections.": {
+      "extractionState": "manual"
+    },
+    "Adjust column mapping": {
+      "extractionState": "manual"
+    },
+    "All brands": {
+      "extractionState": "manual"
+    },
+    "Already consumed in this collection": {
+      "extractionState": "manual"
+    },
+    "Already in collection: %@": {
+      "extractionState": "manual"
+    },
+    "Also split on spaces": {
+      "extractionState": "manual"
+    },
+    "Also use in the item title": {
+      "extractionState": "manual"
+    },
+    "Another user added an item": {
+      "extractionState": "manual"
+    },
+    "Another user removed an item": {
+      "extractionState": "manual"
+    },
+    "Apple’s sharing controls manage invitations and permissions.": {
+      "extractionState": "manual"
+    },
+    "Apply": {
+      "extractionState": "manual"
+    },
+    "Apply to existing items": {
+      "extractionState": "manual"
+    },
+    "Ask the owner to invite people or change sharing permissions.": {
+      "extractionState": "manual"
+    },
+    "Automatic sync added an item": {
+      "extractionState": "manual"
+    },
+    "Automatic sync changed a matched item's status": {
+      "extractionState": "manual"
+    },
+    "Background sync is available only when this importer was opened with a web URL and a collection is selected.": {
+      "extractionState": "manual"
+    },
+    "Background web sync": {
+      "extractionState": "manual"
+    },
+    "Barcode": {
+      "extractionState": "manual"
+    },
+    "Barcode detected": {
+      "extractionState": "manual"
+    },
+    "Barcode detected: %@": {
+      "extractionState": "manual"
+    },
+    "Barcode scanning is currently unavailable. Check camera access in Settings.": {
+      "extractionState": "manual"
+    },
+    "Barcode scanning is not supported on this device.": {
+      "extractionState": "manual"
+    },
+    "Barcode scanning is not supported on this device. You can enter the barcode manually.": {
+      "extractionState": "manual"
+    },
+    "Brand": {
+      "extractionState": "manual"
+    },
+    "Build": {
+      "extractionState": "manual"
+    },
+    "Bulk edit": {
+      "extractionState": "manual"
+    },
+    "CSV import failed": {
+      "extractionState": "manual"
+    },
+    "Camera access is required to scan barcodes.": {
+      "extractionState": "manual"
+    },
+    "Camera access was denied. Enable it in Settings or enter the barcode manually.": {
+      "extractionState": "manual"
+    },
+    "Camera unavailable": {
+      "extractionState": "manual"
+    },
+    "Cancel": {
+      "extractionState": "manual"
+    },
+    "Cards": {
+      "extractionState": "manual"
+    },
+    "Category": {
+      "extractionState": "manual"
+    },
+    "Category controls barcode providers and item detail fields.": {
+      "extractionState": "manual"
+    },
+    "Change": {
+      "extractionState": "manual"
+    },
+    "Change Status": {
+      "extractionState": "manual"
+    },
+    "Change the status of every item in the list": {
+      "extractionState": "manual"
+    },
+    "Changes are saved to iCloud": {
+      "extractionState": "manual"
+    },
+    "Changing a field's type keeps existing values. Each item can replace its value the next time it is edited.": {
+      "extractionState": "manual"
+    },
+    "Changing a field's type keeps existing values. Each item can replace its value the next time it is edited. Removing a field hides its existing values but does not delete them.": {
+      "extractionState": "manual"
+    },
+    "Check for updates": {
+      "extractionState": "manual"
+    },
+    "Checking camera access…": {
+      "extractionState": "manual"
+    },
+    "Checking sharing access…": {
+      "extractionState": "manual"
+    },
+    "Checks %@ for items with the same title, brand, and variant regardless of capitalization. The newest copy is kept.": {
+      "extractionState": "manual"
+    },
+    "Choose Existing Photo": {
+      "extractionState": "manual"
+    },
+    "Choose HTML file": {
+      "extractionState": "manual"
+    },
+    "Choose a section in the sidebar.": {
+      "extractionState": "manual"
+    },
+    "Choose an existing photo instead, or continue without a photo.": {
+      "extractionState": "manual"
+    },
+    "Choose color": {
+      "extractionState": "manual"
+    },
+    "Choose how items are ordered": {
+      "extractionState": "manual"
+    },
+    "Choose where each column of the file goes.": {
+      "extractionState": "manual"
+    },
+    "Clear %@": {
+      "extractionState": "manual"
+    },
+    "Clear the search or filters to edit the whole collection.": {
+      "extractionState": "manual"
+    },
+    "Close": {
+      "extractionState": "manual"
+    },
+    "Close camera": {
+      "extractionState": "manual"
+    },
+    "Close scanner": {
+      "extractionState": "manual"
+    },
+    "Cloud sharing uses your private CloudKit database and shared database.": {
+      "extractionState": "manual"
+    },
+    "Collaborator comments": {
+      "extractionState": "manual"
+    },
+    "Collaborator ratings": {
+      "extractionState": "manual"
+    },
+    "Collect Together": {
+      "extractionState": "manual"
+    },
+    "Collection": {
+      "extractionState": "manual"
+    },
+    "Collection Item": {
+      "extractionState": "manual"
+    },
+    "Collection Manager helps you organize the things you own, want, or are working through.": {
+      "extractionState": "manual"
+    },
+    "Collection maintenance": {
+      "extractionState": "manual"
+    },
+    "Collection name": {
+      "extractionState": "manual"
+    },
+    "Collection settings": {
+      "extractionState": "manual"
+    },
+    "Collection settings…": {
+      "extractionState": "manual"
+    },
+    "Collections": {
+      "extractionState": "manual"
+    },
+    "Collections can be shared with other people through iCloud. Changes, ratings, and comments stay in sync across participants.": {
+      "extractionState": "manual"
+    },
+    "Color": {
+      "extractionState": "manual"
+    },
+    "Column": {
+      "extractionState": "manual"
+    },
+    "Conditional rules": {
+      "extractionState": "manual"
+    },
+    "Conditional rules set a status or a custom field when a column has a specific value, for example when an “Owned?” column says TRUE.": {
+      "extractionState": "manual"
+    },
+    "Conditional rules%@": {
+      "extractionState": "manual"
+    },
+    "Confirm before deleting": {
+      "extractionState": "manual"
+    },
+    "Could not read source": {
+      "extractionState": "manual"
+    },
+    "Create": {
+      "extractionState": "manual"
+    },
+    "Create a new collection": {
+      "extractionState": "manual"
+    },
+    "Create a new custom field": {
+      "extractionState": "manual"
+    },
+    "Create items by hand, scan a barcode, or import them from the web. Add tags, notes, images, and custom metadata as you go.": {
+      "extractionState": "manual"
+    },
+    "Create your first collection to get started.": {
+      "extractionState": "manual"
+    },
+    "Current sharing permissions do not allow uploading this record.": {
+      "extractionState": "manual"
+    },
+    "Currently in storage": {
+      "extractionState": "manual"
+    },
+    "Custom details": {
+      "extractionState": "manual"
+    },
+    "Customize Statuses and Metadata…": {
+      "extractionState": "manual"
+    },
+    "Customize statuses and metadata": {
+      "extractionState": "manual"
+    },
+    "Deduplicate": {
+      "extractionState": "manual"
+    },
+    "Deduplicate imported items": {
+      "extractionState": "manual"
+    },
+    "Default collection icon": {
+      "extractionState": "manual"
+    },
+    "Default status": {
+      "extractionState": "manual"
+    },
+    "Defaults": {
+      "extractionState": "manual"
+    },
+    "Delete": {
+      "extractionState": "manual"
+    },
+    "Delete %@? This can’t be undone.": {
+      "extractionState": "manual"
+    },
+    "Delete %lld items": {
+      "extractionState": "manual"
+    },
+    "Delete All": {
+      "extractionState": "manual"
+    },
+    "Delete All Items": {
+      "extractionState": "manual"
+    },
+    "Delete Collection": {
+      "extractionState": "manual"
+    },
+    "Delete Item": {
+      "extractionState": "manual"
+    },
+    "Delete all imported items": {
+      "extractionState": "manual"
+    },
+    "Delete all imported items? This cannot be undone.": {
+      "extractionState": "manual"
+    },
+    "Delete all items": {
+      "extractionState": "manual"
+    },
+    "Delete all items in this collection? This cannot be undone.": {
+      "extractionState": "manual"
+    },
+    "Delete failed": {
+      "extractionState": "manual"
+    },
+    "Delete item": {
+      "extractionState": "manual"
+    },
+    "Delete this collection? All items and collection settings will be permanently deleted.": {
+      "extractionState": "manual"
+    },
+    "Deleted %@.": {
+      "extractionState": "manual"
+    },
+    "Deleting items…": {
+      "extractionState": "manual"
+    },
+    "Description": {
+      "extractionState": "manual"
+    },
+    "Deselect all": {
+      "extractionState": "manual"
+    },
+    "Detected objects": {
+      "extractionState": "manual"
+    },
+    "Detected table": {
+      "extractionState": "manual"
+    },
+    "Diagnostic type: %@": {
+      "extractionState": "manual"
+    },
+    "Discard and Continue": {
+      "extractionState": "manual"
+    },
+    "Discard the edits you haven’t saved": {
+      "extractionState": "manual"
+    },
+    "Don't import": {
+      "extractionState": "manual"
+    },
+    "Done": {
+      "extractionState": "manual"
+    },
+    "Each item keeps its mapped source status.": {
+      "extractionState": "manual"
+    },
+    "Edit": {
+      "extractionState": "manual"
+    },
+    "Edit %lld items": {
+      "extractionState": "manual"
+    },
+    "Edit Like a Spreadsheet": {
+      "extractionState": "manual"
+    },
+    "Edit collection": {
+      "extractionState": "manual"
+    },
+    "Edit item": {
+      "extractionState": "manual"
+    },
+    "Edit metadata field": {
+      "extractionState": "manual"
+    },
+    "Edit status": {
+      "extractionState": "manual"
+    },
+    "Edit web sync": {
+      "extractionState": "manual"
+    },
+    "Enter a valid 8, 12, 13, or 14 digit barcode.": {
+      "extractionState": "manual"
+    },
+    "Enter a valid number.": {
+      "extractionState": "manual"
+    },
+    "Equals value": {
+      "extractionState": "manual"
+    },
+    "Every %@ · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Every %1$@ · %2$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Every row becomes its own item.": {
+      "extractionState": "manual"
+    },
+    "Every row is imported. Columns are numbered instead of named.": {
+      "extractionState": "manual"
+    },
+    "Every selected row becomes its own item, even when another item has the same title, brand and variant.": {
+      "extractionState": "manual"
+    },
+    "Everything you want to remember, together.": {
+      "extractionState": "manual"
+    },
+    "Exchanges changes with the people you share collections with through iCloud.": {
+      "extractionState": "manual"
+    },
+    "Existing custom fields": {
+      "extractionState": "manual"
+    },
+    "Existing metadata: %@": {
+      "extractionState": "manual"
+    },
+    "Export store copy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export store copy"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Fetched": {
+      "extractionState": "manual"
+    },
+    "Field": {
+      "extractionState": "manual"
+    },
+    "Field name": {
+      "extractionState": "manual"
+    },
+    "Filter or search the list, then change the status of every matching item in one step.": {
+      "extractionState": "manual"
+    },
+    "Filtered items": {
+      "extractionState": "manual"
+    },
+    "Find Product Details by Name": {
+      "extractionState": "manual"
+    },
+    "First item: “%@”": {
+      "extractionState": "manual"
+    },
+    "First row contains column names": {
+      "extractionState": "manual"
+    },
+    "Future shared updates stop. Local records and queued changes are kept safely as read-only data; other collections are unaffected.": {
+      "extractionState": "manual"
+    },
+    "Games EAN lookup": {
+      "extractionState": "manual"
+    },
+    "Games EAN lookup requires your own API key. Save it in this device’s Keychain; no built-in key is supplied. Only the barcode and authentication header are sent to levelcomplete.de. You can add games manually without a key.": {
+      "extractionState": "manual"
+    },
+    "Generate from title": {
+      "extractionState": "manual"
+    },
+    "Generate tags from title": {
+      "extractionState": "manual"
+    },
+    "Get Started": {
+      "extractionState": "manual"
+    },
+    "Help": {
+      "extractionState": "manual"
+    },
+    "Icon": {
+      "extractionState": "manual"
+    },
+    "Identify": {
+      "extractionState": "manual"
+    },
+    "If": {
+      "extractionState": "manual"
+    },
+    "If field": {
+      "extractionState": "manual"
+    },
+    "Ignore": {
+      "extractionState": "manual"
+    },
+    "Import %lld": {
+      "extractionState": "manual"
+    },
+    "Import CSV": {
+      "extractionState": "manual"
+    },
+    "Import failed": {
+      "extractionState": "manual"
+    },
+    "Import repeated rows anyway": {
+      "extractionState": "manual"
+    },
+    "Import status": {
+      "extractionState": "manual"
+    },
+    "Import web / HTML": {
+      "extractionState": "manual"
+    },
+    "Import web data": {
+      "extractionState": "manual"
+    },
+    "Import, share, and manage this collection": {
+      "extractionState": "manual"
+    },
+    "Imported item maintenance": {
+      "extractionState": "manual"
+    },
+    "Invite people": {
+      "extractionState": "manual"
+    },
+    "Item": {
+      "extractionState": "manual"
+    },
+    "Item details": {
+      "extractionState": "manual"
+    },
+    "Item fields": {
+      "extractionState": "manual"
+    },
+    "Item metadata": {
+      "extractionState": "manual"
+    },
+    "Items": {
+      "extractionState": "manual"
+    },
+    "Keep Editing": {
+      "extractionState": "manual"
+    },
+    "Keep everything in one place": {
+      "extractionState": "manual"
+    },
+    "Keep existing tags": {
+      "extractionState": "manual"
+    },
+    "Last Updated": {
+      "extractionState": "manual"
+    },
+    "Layout": {
+      "extractionState": "manual"
+    },
+    "Leave shared collection": {
+      "extractionState": "manual"
+    },
+    "Leave this shared collection?": {
+      "extractionState": "manual"
+    },
+    "Library save failed": {
+      "extractionState": "manual"
+    },
+    "Library update failed": {
+      "extractionState": "manual"
+    },
+    "Load more": {
+      "extractionState": "manual"
+    },
+    "Loading product data…": {
+      "extractionState": "manual"
+    },
+    "Look Up Product": {
+      "extractionState": "manual"
+    },
+    "Looking up product…": {
+      "extractionState": "manual"
+    },
+    "Manage sharing": {
+      "extractionState": "manual"
+    },
+    "Manage tags": {
+      "extractionState": "manual"
+    },
+    "Map API fields": {
+      "extractionState": "manual"
+    },
+    "Map columns": {
+      "extractionState": "manual"
+    },
+    "Map product fields": {
+      "extractionState": "manual"
+    },
+    "Map product metadata": {
+      "extractionState": "manual"
+    },
+    "Mapped values include app enrichments; Raw API values preserve the provider response. Only fields selected below are applied.": {
+      "extractionState": "manual"
+    },
+    "Matched by %@": {
+      "extractionState": "manual"
+    },
+    "Merged tag": {
+      "extractionState": "manual"
+    },
+    "Merged tags": {
+      "extractionState": "manual"
+    },
+    "Metadata field": {
+      "extractionState": "manual"
+    },
+    "Missing: %@": {
+      "extractionState": "manual"
+    },
+    "More": {
+      "extractionState": "manual"
+    },
+    "Moved %@ to %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moved %1$@ to %2$@."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Moved %lld of %lld items to %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Moved %1$lld of %2$lld items to %3$@."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Moves an item to another status, such as In Storage or Consumed.": {
+      "extractionState": "manual"
+    },
+    "Moves several items to the same status at once. Items in collections without that status are left unchanged.": {
+      "extractionState": "manual"
+    },
+    "Name": {
+      "extractionState": "manual"
+    },
+    "New %@ field": {
+      "extractionState": "manual"
+    },
+    "New collection": {
+      "extractionState": "manual"
+    },
+    "New custom fields: %@": {
+      "extractionState": "manual"
+    },
+    "New items": {
+      "extractionState": "manual"
+    },
+    "New metadata: %@": {
+      "extractionState": "manual"
+    },
+    "New web sync": {
+      "extractionState": "manual"
+    },
+    "Next": {
+      "extractionState": "manual"
+    },
+    "No collection": {
+      "extractionState": "manual"
+    },
+    "No collections yet": {
+      "extractionState": "manual"
+    },
+    "No columns were found. Try a different separator.": {
+      "extractionState": "manual"
+    },
+    "No comments yet.": {
+      "extractionState": "manual"
+    },
+    "No field selected": {
+      "extractionState": "manual"
+    },
+    "No fields": {
+      "extractionState": "manual"
+    },
+    "No items match the filters": {
+      "extractionState": "manual"
+    },
+    "No preview objects. Map at least one column to Title.": {
+      "extractionState": "manual"
+    },
+    "No ratings yet. Your rating is optional.": {
+      "extractionState": "manual"
+    },
+    "No status selected": {
+      "extractionState": "manual"
+    },
+    "No web sources": {
+      "extractionState": "manual"
+    },
+    "None": {
+      "extractionState": "manual"
+    },
+    "Nothing selected": {
+      "extractionState": "manual"
+    },
+    "Notifications": {
+      "extractionState": "manual"
+    },
+    "Number": {
+      "extractionState": "manual"
+    },
+    "OK": {
+      "extractionState": "manual"
+    },
+    "Object table": {
+      "extractionState": "manual"
+    },
+    "Open Collection": {
+      "extractionState": "manual"
+    },
+    "Open Item": {
+      "extractionState": "manual"
+    },
+    "Open in default browser": {
+      "extractionState": "manual"
+    },
+    "Open your library with an available iCloud account, then try again.": {
+      "extractionState": "manual"
+    },
+    "Opening your library…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening your library…"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Opens the camera barcode scanner": {
+      "extractionState": "manual"
+    },
+    "Photo": {
+      "extractionState": "manual"
+    },
+    "Photo added": {
+      "extractionState": "manual"
+    },
+    "Pick the column that holds the item name and assign it to “Title”. It is the only required field.": {
+      "extractionState": "manual"
+    },
+    "Point the camera at a product’s barcode to look up its details for you.": {
+      "extractionState": "manual"
+    },
+    "Point the camera at one barcode. You can also enter it manually after closing the scanner.": {
+      "extractionState": "manual"
+    },
+    "Possible matches in your collections": {
+      "extractionState": "manual"
+    },
+    "Preparing secure share…": {
+      "extractionState": "manual"
+    },
+    "Preview": {
+      "extractionState": "manual"
+    },
+    "Privacy information": {
+      "extractionState": "manual"
+    },
+    "Product lookup sends only the barcode. Results are suggestions and never replace changes you make while lookup is running.": {
+      "extractionState": "manual"
+    },
+    "Product metadata": {
+      "extractionState": "manual"
+    },
+    "Provider": {
+      "extractionState": "manual"
+    },
+    "Qty": {
+      "extractionState": "manual"
+    },
+    "Quantity": {
+      "extractionState": "manual"
+    },
+    "Quantity: %lld": {
+      "extractionState": "manual"
+    },
+    "Rate %lld out of 5": {
+      "extractionState": "manual"
+    },
+    "Read and detect objects": {
+      "extractionState": "manual"
+    },
+    "Read only": {
+      "extractionState": "manual"
+    },
+    "Read web page": {
+      "extractionState": "manual"
+    },
+    "Reading HTML…": {
+      "extractionState": "manual"
+    },
+    "Reading import…": {
+      "extractionState": "manual"
+    },
+    "Reading…": {
+      "extractionState": "manual"
+    },
+    "Ready to import": {
+      "extractionState": "manual"
+    },
+    "Reconciliation": {
+      "extractionState": "manual"
+    },
+    "Recovered changes": {
+      "extractionState": "manual"
+    },
+    "Remove API key": {
+      "extractionState": "manual"
+    },
+    "Remove Duplicates": {
+      "extractionState": "manual"
+    },
+    "Remove duplicate imported items? The newest copy will be kept.": {
+      "extractionState": "manual"
+    },
+    "Remove duplicate items": {
+      "extractionState": "manual"
+    },
+    "Remove duplicate items? The newest copy will be kept.": {
+      "extractionState": "manual"
+    },
+    "Remove source": {
+      "extractionState": "manual"
+    },
+    "Removes an item, with its ratings and comments, from its collection.": {
+      "extractionState": "manual"
+    },
+    "Removing a status moves its existing items to the first remaining status.": {
+      "extractionState": "manual"
+    },
+    "Repeated rows are skipped. Add more columns to the Title to tell them apart.": {
+      "extractionState": "manual"
+    },
+    "Replace photo / run OCR": {
+      "extractionState": "manual"
+    },
+    "Require barcode": {
+      "extractionState": "manual"
+    },
+    "Reset to suggestions": {
+      "extractionState": "manual"
+    },
+    "Resizing and switching layouts keep your edits. Choose what happens when you leave this collection.": {
+      "extractionState": "manual"
+    },
+    "Restore this record to iCloud?": {
+      "extractionState": "manual"
+    },
+    "Results for “%@”": {
+      "extractionState": "manual"
+    },
+    "Retry": {
+      "extractionState": "manual"
+    },
+    "Retry invitation": {
+      "extractionState": "manual"
+    },
+    "Return to the item without scanning a barcode.": {
+      "extractionState": "manual"
+    },
+    "Revert": {
+      "extractionState": "manual"
+    },
+    "Review": {
+      "extractionState": "manual"
+    },
+    "Review import": {
+      "extractionState": "manual"
+    },
+    "Review recovered changes": {
+      "extractionState": "manual"
+    },
+    "Rows whose title, brand and variant already exist in the collection are skipped.": {
+      "extractionState": "manual"
+    },
+    "SF Symbol": {
+      "extractionState": "manual"
+    },
+    "Save": {
+      "extractionState": "manual"
+    },
+    "Save API key": {
+      "extractionState": "manual"
+    },
+    "Save and Continue": {
+      "extractionState": "manual"
+    },
+    "Save the edits in every changed row": {
+      "extractionState": "manual"
+    },
+    "Save these settings for background sync": {
+      "extractionState": "manual"
+    },
+    "Save your table edits before leaving?": {
+      "extractionState": "manual"
+    },
+    "Say “Add an item in %@” to add something without opening the app.": {
+      "extractionState": "manual"
+    },
+    "Scan a Barcode": {
+      "extractionState": "manual"
+    },
+    "Scan barcode": {
+      "extractionState": "manual"
+    },
+    "Scanner unavailable": {
+      "extractionState": "manual"
+    },
+    "Search items, metadata, tags…": {
+      "extractionState": "manual"
+    },
+    "Searching products…": {
+      "extractionState": "manual"
+    },
+    "See what matters": {
+      "extractionState": "manual"
+    },
+    "Select a collection before removing duplicates.": {
+      "extractionState": "manual"
+    },
+    "Select a collection in the main window, then open its settings again.": {
+      "extractionState": "manual"
+    },
+    "Select a field to edit its name and type.": {
+      "extractionState": "manual"
+    },
+    "Select a status to edit its name, color, and symbol.": {
+      "extractionState": "manual"
+    },
+    "Select all": {
+      "extractionState": "manual"
+    },
+    "Select the matching product to fill its name, brand, variant, barcode, categories, and available product metadata.": {
+      "extractionState": "manual"
+    },
+    "Separator": {
+      "extractionState": "manual"
+    },
+    "Separators can include comma, pipe, slash, hyphen, or any other special character.": {
+      "extractionState": "manual"
+    },
+    "Set ${items} to ${status}": {
+      "extractionState": "manual"
+    },
+    "Set ${item} to ${status}": {
+      "extractionState": "manual"
+    },
+    "Set %@": {
+      "extractionState": "manual"
+    },
+    "Set Item Status": {
+      "extractionState": "manual"
+    },
+    "Set Status": {
+      "extractionState": "manual"
+    },
+    "Set Status for Items": {
+      "extractionState": "manual"
+    },
+    "Set date": {
+      "extractionState": "manual"
+    },
+    "Set one status for all selected rows": {
+      "extractionState": "manual"
+    },
+    "Settings": {
+      "extractionState": "manual"
+    },
+    "Share and stay in sync": {
+      "extractionState": "manual"
+    },
+    "Share collection": {
+      "extractionState": "manual"
+    },
+    "Share exported store copy": {
+      "extractionState": "manual"
+    },
+    "Share this collection through iCloud so others can add, rate, and comment on items.": {
+      "extractionState": "manual"
+    },
+    "Sharing": {
+      "extractionState": "manual"
+    },
+    "Sharing is not ready": {
+      "extractionState": "manual"
+    },
+    "Sharing label": {
+      "extractionState": "manual"
+    },
+    "Sharing managed by the owner": {
+      "extractionState": "manual"
+    },
+    "Sharing unavailable": {
+      "extractionState": "manual"
+    },
+    "Show Onboarding": {
+      "extractionState": "manual"
+    },
+    "Show Tips Again": {
+      "extractionState": "manual"
+    },
+    "Show in item rows": {
+      "extractionState": "manual"
+    },
+    "Show only items from one brand": {
+      "extractionState": "manual"
+    },
+    "Showing the first 4 of %lld rows.": {
+      "extractionState": "manual"
+    },
+    "Shown in item rows": {
+      "extractionState": "manual"
+    },
+    "Shows a collection in Collection Manager.": {
+      "extractionState": "manual"
+    },
+    "Shows an item’s details in Collection Manager.": {
+      "extractionState": "manual"
+    },
+    "Sign in to iCloud to sync collections.": {
+      "extractionState": "manual"
+    },
+    "Skip": {
+      "extractionState": "manual"
+    },
+    "Some older local records could not be matched to iCloud. They remain on this device and have not been uploaded automatically.": {
+      "extractionState": "manual"
+    },
+    "Source": {
+      "extractionState": "manual"
+    },
+    "Source tags, separated by commas": {
+      "extractionState": "manual"
+    },
+    "Split tags": {
+      "extractionState": "manual"
+    },
+    "State to apply": {
+      "extractionState": "manual"
+    },
+    "Status": {
+      "extractionState": "manual"
+    },
+    "Status for imported items": {
+      "extractionState": "manual"
+    },
+    "Status of %lld selected": {
+      "extractionState": "manual"
+    },
+    "Statuses": {
+      "extractionState": "manual"
+    },
+    "Suggestions are based on column names. You can change every mapping before reviewing the imported objects.": {
+      "extractionState": "manual"
+    },
+    "Support and troubleshooting": {
+      "extractionState": "manual"
+    },
+    "Switch between the card list and the editable table": {
+      "extractionState": "manual"
+    },
+    "Switch on “Also use in the item title” for any column to add it to the name. Those columns still fill their own field as well.": {
+      "extractionState": "manual"
+    },
+    "Switch to Table to edit every item’s fields side by side.": {
+      "extractionState": "manual"
+    },
+    "Sync Collections": {
+      "extractionState": "manual"
+    },
+    "Sync didn’t finish: %@": {
+      "extractionState": "manual"
+    },
+    "Sync needs attention": {
+      "extractionState": "manual"
+    },
+    "Sync now": {
+      "extractionState": "manual"
+    },
+    "Syncing collaboration changes…": {
+      "extractionState": "manual"
+    },
+    "Table": {
+      "extractionState": "manual"
+    },
+    "Tag separators": {
+      "extractionState": "manual"
+    },
+    "Tags": {
+      "extractionState": "manual"
+    },
+    "Tags, separated by commas": {
+      "extractionState": "manual"
+    },
+    "Take Photo": {
+      "extractionState": "manual"
+    },
+    "Tap a field to edit it. Use Edit to reorder or remove fields. Custom fields appear when adding or editing every item in this collection. Removing one hides its existing values but does not delete them.": {
+      "extractionState": "manual"
+    },
+    "Tap a status to edit it. Use Edit to reorder or remove statuses. Removing one moves its existing items to the first remaining status.": {
+      "extractionState": "manual"
+    },
+    "That barcode could not be read. Try holding the camera steady.": {
+      "extractionState": "manual"
+    },
+    "That item is no longer in your collections.": {
+      "extractionState": "manual"
+    },
+    "The barcode scanner became unavailable. You can enter the barcode manually.": {
+      "extractionState": "manual"
+    },
+    "The barcode scanner could not start. Please try again.": {
+      "extractionState": "manual"
+    },
+    "The first row is used as the column names and is not imported.": {
+      "extractionState": "manual"
+    },
+    "The importer detects real HTML tables first. For list-style pages, it falls back to repeated linked objects such as the drink entries on the example page.": {
+      "extractionState": "manual"
+    },
+    "The value is parsed as %@.": {
+      "extractionState": "manual"
+    },
+    "Then": {
+      "extractionState": "manual"
+    },
+    "These local records were kept safely because their earlier iCloud state is unclear. Upload only records you want to restore to iCloud. A record may have been deleted on another device.": {
+      "extractionState": "manual"
+    },
+    "These preferences are stored only on this device and are never included in iCloud sync.": {
+      "extractionState": "manual"
+    },
+    "This change applies to the current filtered results only.": {
+      "extractionState": "manual"
+    },
+    "This explicitly restores the current local value, including any photo. Other collaborators may receive it.": {
+      "extractionState": "manual"
+    },
+    "This status will be applied to every imported item.": {
+      "extractionState": "manual"
+    },
+    "Tips will appear again the next time you open the app.": {
+      "extractionState": "manual"
+    },
+    "Title": {
+      "extractionState": "manual"
+    },
+    "Title part %lld": {
+      "extractionState": "manual"
+    },
+    "Title separators": {
+      "extractionState": "manual"
+    },
+    "Title tag mode": {
+      "extractionState": "manual"
+    },
+    "Two new fields are both named “%@”. They will be created as separate fields.": {
+      "extractionState": "manual"
+    },
+    "Type": {
+      "extractionState": "manual"
+    },
+    "Unavailable field": {
+      "extractionState": "manual"
+    },
+    "Unavailable metadata field": {
+      "extractionState": "manual"
+    },
+    "Unavailable status": {
+      "extractionState": "manual"
+    },
+    "Unsaved changes": {
+      "extractionState": "manual"
+    },
+    "Unsaved table edits": {
+      "extractionState": "manual"
+    },
+    "Update Many Items at Once": {
+      "extractionState": "manual"
+    },
+    "Update existing statuses": {
+      "extractionState": "manual"
+    },
+    "Updated": {
+      "extractionState": "manual"
+    },
+    "Upload recovered record": {
+      "extractionState": "manual"
+    },
+    "Upload this recovered record": {
+      "extractionState": "manual"
+    },
+    "Use %@": {
+      "extractionState": "manual"
+    },
+    "Use any characters as separators, for example , | ; / or -.": {
+      "extractionState": "manual"
+    },
+    "Use in the item title": {
+      "extractionState": "manual"
+    },
+    "Use status from source": {
+      "extractionState": "manual"
+    },
+    "Use statuses, search, filters, and sorting to quickly find what you are looking for in every collection.": {
+      "extractionState": "manual"
+    },
+    "Value to set": {
+      "extractionState": "manual"
+    },
+    "Values are compared after trimming and without case sensitivity. When multiple rules match, later rules can replace values set by earlier rules.": {
+      "extractionState": "manual"
+    },
+    "Variant": {
+      "extractionState": "manual"
+    },
+    "Version": {
+      "extractionState": "manual"
+    },
+    "View-only collection": {
+      "extractionState": "manual"
+    },
+    "Web sync": {
+      "extractionState": "manual"
+    },
+    "When an item has every source tag, the merged tag is added automatically. Existing source tags are kept.": {
+      "extractionState": "manual"
+    },
+    "You can review this collection, but only an owner or editor can change it.": {
+      "extractionState": "manual"
+    },
+    "You can view “%@” but not change it. Ask its owner to make you an editor.": {
+      "extractionState": "manual"
+    },
+    "Your collections": {
+      "extractionState": "manual"
+    },
+    "Your collections are up to date.": {
+      "extractionState": "manual"
+    },
+    "Your library needs attention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your library needs attention"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Your rating": {
+      "extractionState": "manual"
+    },
+    "Your shared shelf": {
+      "extractionState": "manual"
+    },
+    "https://…": {
+      "extractionState": "manual"
+    },
+    "https://… or local HTML file": {
+      "extractionState": "manual"
+    },
+    "iCloud status": {
+      "extractionState": "manual"
+    },
+    "iCloud sync error": {
+      "extractionState": "manual"
+    },
+    "is": {
+      "extractionState": "manual"
+    },
+    "set custom field": {
+      "extractionState": "manual"
+    },
+    "set status": {
+      "extractionState": "manual"
+    },
+    "then": {
+      "extractionState": "manual"
+    },
+    "value": {
+      "extractionState": "manual"
+    },
+    "×%lld": {
+      "extractionState": "manual"
+    },
+    "“%@” already has an item called “%@”.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "“%1$@” already has an item called “%2$@”."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "“%@” doesn’t have a “%@” status.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "“%1$@” doesn’t have a “%2$@” status."
+          }
+        }
+      },
+      "extractionState": "manual"
+    }
+  },
+  "version": "1.0"
 }

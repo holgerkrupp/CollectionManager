@@ -2,6 +2,10 @@ import Foundation
 import OSLog
 import SwiftData
 
+extension Notification.Name {
+    nonisolated static let collectionManagerLocalChanges = Notification.Name("CollectionManager.localChanges")
+}
+
 enum RepositoryFailurePoint { case fetch, save }
 
 enum RepositoryError: LocalizedError, Sendable {
@@ -88,6 +92,7 @@ actor CollectionBackgroundRepository {
         enqueue(context: context, collectionID: collectionID, itemID: itemID, recordName: itemID.uuidString, recordType: "CollectionItem", operation: "delete")
         do {
             try context.save()
+            NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return true
         } catch {
             context.rollback()
@@ -123,6 +128,7 @@ actor CollectionBackgroundRepository {
         guard !items.isEmpty || !events.isEmpty || !ratings.isEmpty || !comments.isEmpty else { return 0 }
         do {
             try context.save()
+            NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return items.count
         } catch {
             context.rollback()
@@ -147,10 +153,17 @@ actor CollectionBackgroundRepository {
         let mutations = (try fetch(context, FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.collectionID == id })))
         let syncStates = (try fetch(context, FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })))
         items.forEach(context.delete); ratings.forEach(context.delete); comments.forEach(context.delete); events.forEach(context.delete); webSyncs.forEach(context.delete); members.forEach(context.delete); mutations.forEach(context.delete); syncStates.forEach(context.delete)
+        // CKRecord parents use .none, so deleting the root does not cascade
+        // remotely. Preserve explicit tombstones for every removed child.
+        for item in items { enqueue(context: context, collectionID: id, itemID: item.id, recordName: item.id.uuidString, recordType: "CollectionItem", operation: "delete") }
+        for rating in ratings { enqueue(context: context, collectionID: id, itemID: rating.itemID, recordName: "\(rating.itemID.uuidString)-rating-\(rating.participantID)", recordType: "CollectionItemRating", operation: "delete") }
+        for comment in comments { enqueue(context: context, collectionID: id, itemID: comment.itemID, recordName: comment.id.uuidString, recordType: "CollectionItemComment", operation: "delete") }
+        for event in events { enqueue(context: context, collectionID: id, itemID: event.itemID, recordName: event.id.uuidString, recordType: "CollectionEvent", operation: "delete") }
         context.delete(collection)
         enqueue(context: context, collectionID: id, itemID: nil, recordName: id.uuidString, recordType: "Collection", operation: "delete")
         do {
             try context.save()
+            NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return true
         } catch {
             context.rollback()
@@ -237,7 +250,7 @@ actor CollectionBackgroundRepository {
         item.comments = ((try fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }, sortBy: [SortDescriptor(\.createdAt)])))).map(\.domain)
         return item
     }
-    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) throws { let record = CollectionRecord(name: name, icon: icon, subtitle: subtitle, settingsJSON: (try? String(data: JSONEncoder().encode(CollectionSettingsPayload(category: category)), encoding: .utf8)) ?? "{}"); context.insert(record); context.insert(CollectionMemberRecord(collectionID: record.id, participantID: "local", role: .owner)); enqueue(collectionID: record.id, recordName: record.id.uuidString, recordType: "Collection"); try save() }
+    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) throws { let record = CollectionRecord(name: name, icon: icon, subtitle: subtitle, settingsJSON: (try? String(data: JSONEncoder().encode(CollectionSettingsPayload(category: category)), encoding: .utf8)) ?? "{}"); context.insert(record); context.insert(CollectionMemberRecord(collectionID: record.id, participantID: "local", role: .owner)); enqueue(collectionID: record.id, recordName: record.id.uuidString, recordType: "Collection", operation: "createCollection"); try save() }
     func deleteCollection(_ collection: CollectionModel) throws {
         guard try role(for: collection.id).canDelete else { throw RepositoryError.permissionDenied }
         let collectionID = collection.id
@@ -269,9 +282,9 @@ actor CollectionBackgroundRepository {
         // pointing at a status that can no longer be selected or displayed.
         let validStatusIDs = Set(statuses.map(\.id))
         let records = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }))
-        if let fallback = statuses.first?.id {
+        if !statuses.isEmpty {
             for item in records where !validStatusIDs.contains(item.stateRawValue) {
-                item.stateRawValue = fallback
+                item.stateRawValue = defaultStatusID
                 item.updatedAt = .now
             }
         }
@@ -289,6 +302,8 @@ actor CollectionBackgroundRepository {
         }
         var item = item
         try validateCreation(barcode: item.barcode, collectionID: collectionID)
+        try validatePayload(metadata: item.metadata, dates: [item.createdAt, item.updatedAt] + Array(item.dateTags.values) + [item.consumedAt].compactMap { $0 }, sourceSnapshot: item.sourceSnapshot)
+        item.state = normalizedState(item.state, settings: try collectionSettings(for: collectionID))
         item.tags = TagUtilities.applyingMergedTags(item.tags, rules: try mergedTags(for: item.collectionID))
         context.insert(ItemRecord(from: item))
         context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "created"))
@@ -332,6 +347,7 @@ actor CollectionBackgroundRepository {
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !drafts.isEmpty else { return }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let settings = try collectionSettings(for: collectionID)
+        for entry in drafts { try validatePayload(metadata: entry.draft.metadata) }
         if settings.barcodeRequired {
             for entry in drafts {
                 let identity = importIdentity(title: entry.draft.title, brand: entry.draft.brand, variant: entry.draft.variant)
@@ -348,7 +364,8 @@ actor CollectionBackgroundRepository {
         for record in records { byIdentity[importIdentity(title: record.title, brand: record.brand, variant: record.variant)] = record }
 
         for entry in drafts {
-            let draft = entry.draft
+            var draft = entry.draft
+            draft.state = normalizedState(draft.state, wasExplicit: draft.stateWasExplicit, settings: settings)
             let sourceIdentity = importSourceIdentity(entry.sourceKey)
             let existing = bySource[sourceIdentity] ?? byIdentity[importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)]
             if let existing {
@@ -369,6 +386,31 @@ actor CollectionBackgroundRepository {
         }
         try save()
     }
+    /// New-item imports preserve the review's duplicate policy in one commit.
+    func importNewDrafts(_ drafts: [ImportDraft], collectionID: UUID, allowsDuplicates: Bool) throws {
+        guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
+        let settings = try collectionSettings(for: collectionID)
+        for draft in drafts {
+            try validatePayload(metadata: draft.metadata)
+            try validateCreation(barcode: draft.barcode, collectionID: collectionID)
+        }
+        let rules = try mergedTags(for: collectionID)
+        var identities: Set<String> = []
+        if !allowsDuplicates {
+            identities = Set(try items(in: collectionID).map { importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) })
+        }
+        for draft in drafts {
+            let identity = importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)
+            if !allowsDuplicates && !identities.insert(identity).inserted { continue }
+            let state = normalizedState(draft.state, wasExplicit: draft.stateWasExplicit, settings: settings)
+            let item = CollectionItem(id: UUID(), collectionID: collectionID, title: draft.title, brand: draft.brand, variant: draft.variant, itemDescription: draft.description, state: state, quantity: draft.quantity, barcode: draft.barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: TagUtilities.applyingMergedTags(draft.tags, rules: rules), metadata: draft.metadata, imageSystemName: "shippingbox.fill", imageData: nil, importSourceKey: draft.sourceIdentifier)
+            context.insert(ItemRecord(from: item))
+            context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "created"))
+            context.insert(EventRecord(itemID: item.id, collectionID: collectionID, type: "imported"))
+        }
+        try save()
+    }
+
     func deduplicateItems(in collectionID: UUID) throws -> Int {
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])))
@@ -451,6 +493,7 @@ actor CollectionBackgroundRepository {
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !drafts.isEmpty else { return WebSyncApplyResult() }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let settings = try collectionSettings(for: collectionID)
+        for entry in drafts { try validatePayload(metadata: entry.draft.metadata) }
         if settings.barcodeRequired {
             for entry in drafts {
                 let identity = importIdentity(title: entry.draft.title, brand: entry.draft.brand, variant: entry.draft.variant)
@@ -471,7 +514,8 @@ actor CollectionBackgroundRepository {
         var matchedStateChanges: [AutomaticSyncStateChange] = []
 
         for entry in drafts {
-            let draft = entry.draft
+            var draft = entry.draft
+            draft.state = normalizedState(draft.state, wasExplicit: draft.stateWasExplicit, settings: settings)
             let sourceIdentity = importSourceIdentity(entry.sourceKey)
             let itemIdentity = importIdentity(title: draft.title, brand: draft.brand, variant: draft.variant)
             if let existing = bySource[sourceIdentity] ?? byIdentity[itemIdentity] {
@@ -501,9 +545,21 @@ actor CollectionBackgroundRepository {
         try save()
         return WebSyncApplyResult(added: added, updated: updated, addedItems: addedItems, matchedStateChanges: matchedStateChanges)
     }
-    func updateItem(_ item: CollectionItem, previousState: ItemState? = nil) throws { guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }; let itemID = item.id; let record = try requireItem(itemID, in: item.collectionID); var item = item; item.tags = TagUtilities.applyingMergedTags(item.tags, rules: try mergedTags(for: item.collectionID)); record.update(from: item); if let previousState, previousState != item.state { context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "stateChanged", note: "\(previousState.label) → \(item.state.label)")) }; enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem"); try save() }
+    func updateItem(_ item: CollectionItem, previousState: ItemState? = nil) throws {
+        guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
+        let record = try requireItem(item.id, in: item.collectionID)
+        try validatePayload(metadata: item.metadata, dates: [item.createdAt, item.updatedAt] + Array(item.dateTags.values) + [item.consumedAt].compactMap { $0 }, sourceSnapshot: item.sourceSnapshot)
+        var item = item
+        item.state = normalizedState(item.state, settings: try collectionSettings(for: item.collectionID))
+        item.tags = TagUtilities.applyingMergedTags(item.tags, rules: try mergedTags(for: item.collectionID))
+        record.update(from: item)
+        if let previousState, previousState != item.state { context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "stateChanged", note: "\(previousState.label) → \(item.state.label)")) }
+        enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
+        try save()
+    }
     @discardableResult func bulkUpdateState(for itemIDs: Set<UUID>, in collectionID: UUID, to state: ItemState) throws -> Int {
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !itemIDs.isEmpty else { return 0 }
+        let state = normalizedState(state, settings: try collectionSettings(for: collectionID))
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         var changed = 0
         for record in records where itemIDs.contains(record.id) {
@@ -767,6 +823,25 @@ actor CollectionBackgroundRepository {
         return model(from: record)
     }
 
+    private func normalizedState(_ state: ItemState, wasExplicit: Bool = true, settings: CollectionModel) -> ItemState {
+        if wasExplicit && settings.statuses.contains(where: { $0.id == state.rawValue }) { return state }
+        return ItemState(rawValue: settings.defaultStatusID)
+    }
+
+    /// V1’s model convenience conversions retain their historical tolerant
+    /// encoding behavior. Validate new payloads at the transaction boundary so
+    /// nonfinite numbers/dates can never silently replace metadata with `{}`.
+    private func validatePayload(metadata: [String: MetadataValue], dates: [Date] = [], sourceSnapshot: ProductSourceSnapshot? = nil) throws {
+        do {
+            let encoder = JSONEncoder()
+            _ = try encoder.encode(metadata)
+            _ = try encoder.encode(dates)
+            if let sourceSnapshot { _ = try encoder.encode(sourceSnapshot) }
+        } catch {
+            throw RepositoryError.validation("This item contains a number or date that cannot be saved. Correct its metadata and try again.")
+        }
+    }
+
     private func validateCreation(barcode: Barcode?, collectionID: UUID) throws {
         guard !(try collectionSettings(for: collectionID)).barcodeRequired || barcode != nil else { throw RepositoryError.validation("This collection requires a barcode for every item.") }
     }
@@ -774,7 +849,7 @@ actor CollectionBackgroundRepository {
     private func journalContextChanges() throws {
         // Only deduplicate inside this transaction. An older in-flight mutation
         // must not absorb this edit: acknowledgement removes its generation ID.
-        var pending = Set(context.insertedModelsArray.compactMap { $0 as? SyncMutationRecord }.map { "\($0.recordType)|\($0.recordName)|\($0.operation)" })
+        var pending = Set(context.insertedModelsArray.compactMap { $0 as? SyncMutationRecord }.map { "\($0.recordType)|\($0.recordName)|\($0.operation == "createCollection" ? "save" : $0.operation)" })
         func stage(_ model: any PersistentModel, operation: String) {
             let identity: (UUID, UUID?, String, String)
             switch model {
@@ -796,8 +871,10 @@ actor CollectionBackgroundRepository {
     private func save(journaling: Bool = true) throws -> Bool {
         do {
             if journaling { try journalContextChanges() }
+            let hasNewOutgoingIntent = context.insertedModelsArray.contains { $0 is SyncMutationRecord }
             try failureInjector?(.save)
             try context.save()
+            if journaling && hasNewOutgoingIntent { NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil) }
             lastPersistenceError = nil
             return true
         } catch {

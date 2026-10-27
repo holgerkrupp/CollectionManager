@@ -34,6 +34,9 @@ struct RootView: View {
                 }
             }.refreshable { await store.syncCollections() }.navigationTitle("Collections").onChange(of: store.selectedCollection?.id) { _, id in if selectedCollectionID != id { selectedCollectionID = id } }.toolbar { ToolbarItem(placement: .platformTrailing) { Button { showingNewCollection = true } label: { Label("New collection", systemImage: "plus") }.help("Create a new collection") } }
         } detail: { if store.selectedCollection != nil { CollectionDetailView() } else { ContentUnavailableView("No collections yet", systemImage: "square.stack.3d.up", description: Text("Create your first collection to get started.")) } }
+        .alert("Library update failed", isPresented: Binding(get: { store.persistenceError != nil }, set: { if !$0 { store.persistenceError = nil } })) {
+            Button("OK") { store.persistenceError = nil }
+        } message: { Text(store.persistenceError ?? "Your library could not save this change.") }
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
         #if os(iOS)
         .sheet(isPresented: $showingSettings) { SettingsView() }
@@ -48,6 +51,7 @@ struct RootView: View {
             AppTips.hasCompletedOnboarding = onboardingCompleted
             if !onboardingCompleted { showingOnboarding = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in store.refreshLocale() }
         .onChange(of: onboardingCompleted) { _, completed in AppTips.hasCompletedOnboarding = completed }
         .confirmationDialog("Save your table edits before leaving?", isPresented: $showingUnsavedEdits, titleVisibility: .visible) {
             Button("Save and Continue") {

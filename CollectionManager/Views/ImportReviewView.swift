@@ -251,7 +251,7 @@ struct ProductMetadataMappingView: View {
 
     private func applyMapping() {
         let preparation = CollectionImporter().prepareMetadataMapping(headers: fields.map(\.name), values: fields.map(\.value), mapping: mapping, existingMetadataFields: store.selectedCollection?.metadataFields ?? [])
-        store.addMetadataFields(preparation.newMetadataFields)
+        guard store.addMetadataFields(preparation.newMetadataFields) else { return }
         metadata.merge(preparation.metadata) { _, mapped in mapped }
         dismiss()
     }
@@ -366,13 +366,11 @@ struct ImportReviewView: View {
 
     private func importSelected() {
         let selectedDrafts = drafts.filter { selected.contains($0.id) }
-        store.addMetadataFields(metadataFieldsToCreate)
+        guard store.addMetadataFields(metadataFieldsToCreate) else { return }
         if useSourceDeduplication {
-            store.importDrafts(selectedDrafts)
+            guard store.importDrafts(selectedDrafts) else { return }
         } else {
-            for draft in selectedDrafts {
-                store.addItem(title: draft.title, brand: draft.brand, variant: draft.variant, description: draft.description, state: draft.state, quantity: draft.quantity, tags: draft.tags, metadata: draft.metadata, barcode: draft.barcode, sourceIdentifier: draft.sourceIdentifier, allowsDuplicates: allowsDuplicates)
-            }
+            guard store.importNewDrafts(selectedDrafts, allowsDuplicates: allowsDuplicates) else { return }
         }
         onImport?()
         dismiss()

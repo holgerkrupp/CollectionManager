@@ -75,7 +75,7 @@ private final class CloudKitChangeTokenStore {
     }
 }
 
-final class CloudKitSharingService {
+final class LegacyCloudKitSharingService {
     static let containerIdentifier = "iCloud.de.holgerkrupp.CollectionManager"
     private static let bootstrapKey = "cloudSync.didBootstrapLocalData"
     private static let imageBootstrapKey = "cloudSync.didUploadImagesV1"
@@ -494,7 +494,7 @@ final class CloudKitSharingService {
     private func ensureSubscription(for zoneID: CKRecordZone.ID, in database: CKDatabase) async {
         let key = "cloudSync.subscription.\(database.databaseScope.rawValue).\(zoneID.ownerName).\(zoneID.zoneName)"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        let subscription = CKRecordZoneSubscription(zoneID: zoneID)
+        let subscription = CKRecordZoneSubscription(zoneID: zoneID, subscriptionID: key)
         let info = CKSubscription.NotificationInfo()
         info.shouldSendContentAvailable = true
         subscription.notificationInfo = info

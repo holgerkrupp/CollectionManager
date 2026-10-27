@@ -49,7 +49,7 @@ struct WebSyncResult: Sendable {
             for draft in drafts {
                 let key = sourceKey(configuration, draft: draft)
                 var effectiveDraft = draft
-                if let fixedState = configuration.fixedState { effectiveDraft.state = fixedState }
+                if let fixedState = configuration.fixedState { effectiveDraft.state = fixedState; effectiveDraft.stateWasExplicit = true }
                 if !configuration.addNewItems && !existingSourceKeys.contains(key.lowercased()) { continue }
                 entries.append((effectiveDraft, key, configuration.updateExistingStates))
             }

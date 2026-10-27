@@ -190,7 +190,7 @@ struct WebSyncEditorView: View {
         }
         let table = tables[selectedTable]
         let preparation = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: collection.metadataFields)
-        store.addMetadataFields(preparation.newMetadataFields)
+        guard store.addMetadataFields(preparation.newMetadataFields) else { return }
         let persistedMapping = resolvedMapping(using: preparation.newMetadataFields)
         if let existingSync {
             existingSync.urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,9 +199,9 @@ struct WebSyncEditorView: View {
             existingSync.mappingJSON = (try? String(data: JSONEncoder().encode(persistedMapping), encoding: .utf8)) ?? "[]"
             existingSync.conditionalRulesJSON = (try? String(data: JSONEncoder().encode(conditionalRules), encoding: .utf8)) ?? "[]"
             existingSync.intervalMinutes = intervalMinutes; existingSync.addNewItems = addNewItems; existingSync.updateExistingStates = updateExistingStates; existingSync.fixedStateRawValue = fixedState?.rawValue; existingSync.tagSeparators = tagSeparators; existingSync.splitTagsOnWhitespace = splitTagsOnWhitespace; existingSync.generateTagsFromTitle = generateTagsFromTitle; existingSync.titleTagModeRawValue = titleTagMode.rawValue; existingSync.titleSeparators = titleSeparators
-            store.updateWebSync(existingSync)
+            guard store.updateWebSync(existingSync) else { return }
         } else {
-            store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: persistedMapping, conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+            guard store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: table.name, headers: table.headers, mapping: persistedMapping, conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions)) else { return }
         }
         dismiss()
     }

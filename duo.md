@@ -1,3 +1,5 @@
+> Scope: this is forward-looking platform guidance. For 1.0, only draft/edit-session safety from issue #8 is required; other Duo-specific enhancements remain optional post-1.0 work. GitHub issue #16 is the release authority.
+
 # Collection Manager on iPhone Duo
 
 ## Release scope

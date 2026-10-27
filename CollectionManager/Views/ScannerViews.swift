@@ -14,11 +14,11 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
         return scanner
     }
     func updateUIViewController(_ controller: DataScannerViewController, context: Context) {
-        guard DataScannerViewController.isSupported else { onError("Barcode scanning is not supported on this device."); return }
-        guard DataScannerViewController.isAvailable else { onError("Barcode scanning is currently unavailable. Check camera access in Settings."); return }
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { onError("Camera access is required to scan barcodes."); return }
+        guard DataScannerViewController.isSupported else { onError(String(localized: "Barcode scanning is not supported on this device.")); return }
+        guard DataScannerViewController.isAvailable else { onError(String(localized: "Barcode scanning is currently unavailable. Check camera access in Settings.")); return }
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { onError(String(localized: "Camera access is required to scan barcodes.")); return }
         guard !controller.isScanning else { return }
-        do { try controller.startScanning() } catch { onError("The barcode scanner could not start. Please try again.") }
+        do { try controller.startScanning() } catch { onError(String(localized: "The barcode scanner could not start. Please try again.")) }
     }
     static func dismantleUIViewController(_ controller: DataScannerViewController, coordinator: Coordinator) {
         controller.stopScanning()
@@ -31,8 +31,8 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
         func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) { _ = scan(item, with: dataScanner, reportInvalid: true) }
         private func scan(_ item: RecognizedItem, with dataScanner: DataScannerViewController, reportInvalid: Bool = false) -> Bool {
             guard !didScan else { return false }
-            guard case .barcode(let code) = item, let value = code.payloadStringValue, let barcode = Barcode(rawValue: value) else {
-                if reportInvalid { onError("That barcode could not be read. Try holding the camera steady.") }
+            guard case .barcode(let code) = item, let value = code.payloadStringValue, let barcode = Barcode(rawValue: value, type: code.observation.symbology == .upce ? "UPC-E" : (code.observation.symbology == .ean8 ? "EAN-8" : "EAN-13")) else {
+                if reportInvalid { onError(String(localized: "That barcode could not be read. Try holding the camera steady.")) }
                 return false
             }
             didScan = true
@@ -42,7 +42,7 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
             onScan(barcode)
             return true
         }
-        func dataScanner(_ dataScanner: DataScannerViewController, becameUnavailableWithError error: Error) { onError("The barcode scanner became unavailable. You can enter the barcode manually.") }
+        func dataScanner(_ dataScanner: DataScannerViewController, becameUnavailableWithError error: Error) { onError(String(localized: "The barcode scanner became unavailable. You can enter the barcode manually.")) }
     }
 }
 
@@ -51,21 +51,30 @@ struct BarcodeScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var message: String?
     @State private var permissionRequested = false
+    @State private var cameraAuthorized = false
     @State private var detectedBarcode: Barcode?
 
     var body: some View {
         ZStack {
             if let message {
                 ContentUnavailableView("Scanner unavailable", systemImage: "camera.slash", description: Text(message))
-                    .overlay(alignment: .bottom) { Button("Close") { dismiss() }.buttonStyle(.bordered).padding(.bottom, 24) }
-            } else {
+            } else if cameraAuthorized {
                 BarcodeScannerView(onScan: { value in
                     detectedBarcode = value
                     onScan(value)
-                    UIAccessibility.post(notification: .announcement, argument: "Barcode detected: \(value.value)")
+                    UIAccessibility.post(notification: .announcement, argument: String(localized: "Barcode detected: \(value.value)"))
                     dismiss()
-                }, onError: { message = $0 })
+                }, onError: { error in Task { @MainActor in message = error } })
                     .ignoresSafeArea()
+                    .overlay(alignment: .bottom) {
+                        Text("Point the camera at one barcode. You can also enter it manually after closing the scanner.")
+                            .font(.body)
+                            .padding()
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                            .padding()
+                    }
+            } else {
+                ProgressView("Checking camera access…")
             }
 
             if let detectedBarcode {
@@ -82,12 +91,25 @@ struct BarcodeScannerSheet: View {
                 .accessibilityElement(children: .combine)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            Button("Close scanner") { dismiss() }
+                .buttonStyle(.bordered)
+                .padding(12)
+                .background(.regularMaterial, in: Capsule())
+                .padding()
+                .accessibilityHint("Return to the item without scanning a barcode.")
+        }
         .task {
             guard !permissionRequested else { return }
             permissionRequested = true
-            guard AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined else { return }
-            let granted = await AVCaptureDevice.requestAccess(for: .video)
-            if !granted { message = "Camera access was denied. Enable it in Settings or enter the barcode manually." }
+            guard DataScannerViewController.isSupported else {
+                message = String(localized: "Barcode scanning is not supported on this device. You can enter the barcode manually.")
+                return
+            }
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            let granted = status == .notDetermined ? await AVCaptureDevice.requestAccess(for: .video) : status == .authorized
+            if granted { cameraAuthorized = true }
+            else { message = String(localized: "Camera access was denied. Enable it in Settings or enter the barcode manually.") }
         }
     }
 }
@@ -95,8 +117,19 @@ struct BarcodeScannerSheet: View {
 struct PhotoCaptureView: UIViewControllerRepresentable {
     let onImage: (Data) -> Void; @Environment(\.dismiss) private var dismiss
     func makeCoordinator() -> Coordinator { Coordinator(onImage: onImage, dismiss: dismiss) }
-    func makeUIViewController(context: Context) -> UIImagePickerController { let picker = UIImagePickerController(); picker.sourceType = .camera; picker.delegate = context.coordinator; return picker }
-    func updateUIViewController(_ controller: UIImagePickerController, context: Context) { }
+    func makeUIViewController(context: Context) -> UIViewController {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            return UIHostingController(rootView: VStack(spacing: 20) {
+                ContentUnavailableView("Camera unavailable", systemImage: "camera.slash", description: Text("Choose an existing photo instead, or continue without a photo."))
+                Button("Close camera") { dismiss() }.buttonStyle(.bordered)
+            }.padding())
+        }
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: UIViewController, context: Context) { }
     final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let onImage: (Data) -> Void; let dismiss: DismissAction
         init(onImage: @escaping (Data) -> Void, dismiss: DismissAction) { self.onImage = onImage; self.dismiss = dismiss }
