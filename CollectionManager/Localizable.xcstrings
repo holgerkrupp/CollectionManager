@@ -1593,6 +1593,17 @@
         }
       },
       "extractionState": "manual"
+    },
+    "This CSV file has an unfinished quoted field. Close the quote in the source file and import it again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This CSV file has an unfinished quoted field. Close the quote in the source file and import it again."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

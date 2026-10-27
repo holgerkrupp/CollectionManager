@@ -1,5 +1,12 @@
 import Foundation
 
+nonisolated enum CSVImportError: LocalizedError {
+    case unterminatedQuotedField
+    var errorDescription: String? {
+        String(localized: "This CSV file has an unfinished quoted field. Close the quote in the source file and import it again.")
+    }
+}
+
 nonisolated struct ImportDraft: Identifiable, Sendable {
     let id = UUID()
     var title: String
@@ -104,6 +111,7 @@ nonisolated struct CollectionImporter {
     nonisolated func parseTable(_ data: Data) throws -> CSVImportTable {
         guard var text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
         if text.first == "\u{feff}" { text.removeFirst() }
+        try validateQuotedFields(text)
         let delimiter = detectedDelimiter(in: text)
         let rows = parseRows(text, delimiter: delimiter).filter { row in
             row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -128,6 +136,7 @@ nonisolated struct CollectionImporter {
             throw CocoaError(.fileReadCorruptFile)
         }
         if text.first == "\u{feff}" { text.removeFirst() }
+        try validateQuotedFields(text)
         let delimiter = CSVDelimiter.allCases.first { $0.character == detectedDelimiter(in: text) } ?? .comma
         let rows = rows(in: text, delimiter: delimiter)
         return CSVParsedFile(fileName: fileName, text: text, detectedDelimiter: delimiter, suggestsHeaderRow: looksLikeHeaderRow(rows))
@@ -244,7 +253,7 @@ nonisolated struct CollectionImporter {
             // distinguishable — so every column mapped to a field is joined.
             func value(_ field: HTMLImportField) -> String {
                 let parts = mapping.indices.filter { mapping[$0] == .standard(field) }.map(rawValue(at:)).filter { !$0.isEmpty }
-                let separator = field == .description ? " · " : " "
+                let separator = field == .tags ? "," : (field == .description ? " · " : " ")
                 return parts.joined(separator: separator)
             }
 
@@ -417,6 +426,20 @@ nonisolated struct CollectionImporter {
             index = text.index(after: index)
         }
         return candidates.max { counts[$0, default: 0] < counts[$1, default: 0] } ?? ","
+    }
+
+    nonisolated private func validateQuotedFields(_ text: String) throws {
+        var quoted = false
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index] == "\"" {
+                let next = text.index(after: index)
+                if quoted, next < text.endIndex, text[next] == "\"" { index = next }
+                else { quoted.toggle() }
+            }
+            index = text.index(after: index)
+        }
+        guard !quoted else { throw CSVImportError.unterminatedQuotedField }
     }
 
     nonisolated private func parseRows(_ text: String, delimiter: Character) -> [[String]] {
