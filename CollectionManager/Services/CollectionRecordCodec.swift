@@ -39,7 +39,7 @@ struct CollectionLegacyCandidate: Identifiable, Sendable {
 
 /// SwiftData models and contexts stay on this actor. CKRecords crossing the
 /// boundary are immutable snapshots; no model instance leaves this executor.
-actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
+actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     nonisolated let modelContainer: ModelContainer
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let containerIdentifier: String
@@ -161,9 +161,14 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
 
         guard !zoneID.ownerName.isEmpty, !zoneID.zoneName.isEmpty else { throw CollectionCodecError.routingUnavailable }
         let value: CollectionZone
-        if let existing = try zones().first(where: { $0.collectionID == collectionID }) {
+        let matchingZones = try zones().filter { $0.collectionID == collectionID }
+        if let existing = matchingZones.first(where: { $0.scope == "shared" }) ?? matchingZones.first {
             // A joined collection wins over a legacy private shadow, never the inverse.
             if existing.scope == "shared" && scope == .private { return }
+            if existing.scope == "shared", scope == .shared,
+               (existing.ownerName != zoneID.ownerName || existing.zoneName != zoneID.zoneName) {
+                throw CollectionCodecError.routingUnavailable
+            }
             value = existing
         } else {
             value = CollectionZone(partition: partition, collectionID: collectionID, scope: scope.rawValue, zoneName: zoneID.zoneName, ownerName: zoneID.ownerName)
@@ -212,11 +217,14 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
     }
 
     func knownZones(in scope: CollaborationDatabaseScope) throws -> [CKRecordZone.ID] {
-        try zones().filter { $0.scope == scope.rawValue && $0.active }.map { CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName) }
+        let all = try zones()
+        let joinedIDs = Set(all.filter { $0.scope == "shared" }.map(\.collectionID))
+        return all.filter { $0.scope == scope.rawValue && $0.active && (scope != .private || !joinedIDs.contains($0.collectionID)) }.map { CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName) }
     }
 
     private func locator(for collectionID: UUID) throws -> CollectionZone {
-        if let zone = try zones().first(where: { $0.collectionID == collectionID }) { return zone }
+        let matching = try zones().filter { $0.collectionID == collectionID }
+        if let zone = matching.first(where: { $0.scope == "shared" }) ?? matching.first { return zone }
         let id = collectionID
         let members = try modelContext.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id }))
         let ownerDeletion = try first(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.collectionID == id && $0.recordType == "Collection" && $0.operation == "delete" })) != nil
@@ -253,7 +261,9 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         for member in try modelContext.fetch(FetchDescriptor<CollectionMemberRecord>()) where !member.participantID.hasPrefix("share:") { roles[member.collectionID] = member.roleRawValue }
         // An owner delete has already passed the repository authorization check.
         for deletion in try modelContext.fetch(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.recordType == "Collection" && $0.operation == "delete" })) where roles[deletion.collectionID] == nil { roles[deletion.collectionID] = "owner" }
-        for zone in try zones() { roles[zone.collectionID] = zone.roleRawValue }
+        let allZones = try zones()
+        for zone in allZones where zone.scope != "shared" { roles[zone.collectionID] = zone.roleRawValue }
+        for zone in allZones where zone.scope == "shared" { roles[zone.collectionID] = zone.roleRawValue }
         return Set(roles.compactMap { $0.value == "owner" || $0.value == "editor" ? $0.key : nil })
     }
 
@@ -277,7 +287,8 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         descriptor.fetchLimit = min(limit, 100); descriptor.fetchOffset = offset
         return try modelContext.fetch(descriptor).map { row in
             guard let archive = row.recordArchive, let record = try NSKeyedUnarchiver.unarchivedObject(ofClass: CKRecord.self, from: archive) else { throw CollectionCodecError.malformedRecord }
-            return CollectionLegacyCandidate(id: row.id, collectionID: row.collectionID, recordName: row.recordName, recordType: row.recordType, title: record["title"] as? String ?? record["name"] as? String ?? row.recordType, canUpload: eligible.contains(row.collectionID))
+            let canonicalScope = try locator(for: row.collectionID).scope
+            return CollectionLegacyCandidate(id: row.id, collectionID: row.collectionID, recordName: row.recordName, recordType: row.recordType, title: record["title"] as? String ?? record["name"] as? String ?? row.recordType, canUpload: eligible.contains(row.collectionID) && canonicalScope == row.scope)
         }
     }
 
@@ -288,7 +299,8 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         try claimGraph()
         let key = partition
         guard let row = try first(FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate { $0.partition == key && $0.id == snapshotID && $0.operation == "baseline" })), let scope = CollaborationDatabaseScope(rawValue: row.scope) else { throw CollectionCodecError.malformedRecord }
-        guard try eligibleCollectionIDs().contains(row.collectionID) else { throw RepositoryError.permissionDenied }
+        let canonicalScope = try locator(for: row.collectionID).scope
+        guard try eligibleCollectionIDs().contains(row.collectionID), canonicalScope == row.scope else { throw RepositoryError.permissionDenied }
         guard let model = try domainModel(recordName: row.recordName, type: row.recordType, collectionID: row.collectionID) else { throw CollectionCodecError.missingRoot }
         try stage(.save(encodeModel(model, id: rowID(row), scope: scope)), mutationIDs: [], scope: scope)
         row.operation = "baselineReconciled"
@@ -337,7 +349,7 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         try commit()
     }
 
-    private func stage(_ change: CloudKitRecordChange, mutationIDs: [UUID], scope: CollaborationDatabaseScope, baseline: Bool = false) throws {
+    private func stage(_ change: CloudKitRecordChange, mutationIDs: [UUID], scope: CollaborationDatabaseScope, baseline: Bool = false, forceQuarantine: Bool = false) throws {
         let id = change.recordID
         let row = CollectionOutgoingSnapshot(partition: partition, scope: scope.rawValue, zoneName: id.zoneID.zoneName, ownerName: id.zoneID.ownerName, recordName: id.recordName)
         row.collectionID = try self.collectionID(for: id.zoneID, scope: scope)
@@ -357,7 +369,7 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         }
         if baseline {
             row.operation = "baseline"
-            if case .save(let record) = change, let confirmed = try systemState(for: id, scope: scope) {
+            if !forceQuarantine, case .save(let record) = change, let confirmed = try systemState(for: id, scope: scope) {
                 row.operation = "baselineReconciled"
                 let localTime = record["updatedAt"] as? Date ?? record["timestamp"] as? Date ?? .distantPast
                 if !(try hasLocalIntent(id, scope: scope)), localTime > (confirmed.serverModifiedAt ?? .distantFuture) {
@@ -577,6 +589,7 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         defer { if modelContext.hasChanges { modelContext.rollback() } }
 
         for record in savedRecords { try remember(record, scope: scope); try markBaselineReconciled(record.recordID, scope: scope) }
+        for id in deletedRecordIDs { try markBaselineReconciled(id, scope: scope) }
         for id in savedRecords.map(\.recordID) + deletedRecordIDs {
             let key = identity(id, scope: scope)
             let rows = try outgoing(scope).filter { rowID($0) == id && ($0.operation == "save" || $0.operation == "delete") }
@@ -600,12 +613,22 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         defer { modelContext.author = nil }
         let pending = try outgoing(scope).filter { $0.operation == "save" || $0.operation == "delete" }
         for record in records.sorted(by: { $0.recordType == "Collection" && $1.recordType != "Collection" }) {
+            if try isPrivateShadow(record.recordID, scope: scope) {
+                if try baselineRows(for: record.recordID, scope: scope).isEmpty {
+                    try stage(.save(record), mutationIDs: [], scope: scope, baseline: true, forceQuarantine: true)
+                }
+                continue
+            }
             try remember(record, scope: scope)
             try reconcileBaseline(record, scope: scope)
             if try pending.contains(where: { rowID($0) == record.recordID }) || hasLocalIntent(record.recordID, scope: scope) { continue }
             try apply(record, scope: scope)
         }
         for id in deletedRecordIDs {
+            if try isPrivateShadow(id, scope: scope) {
+                try markBaselineReconciled(id, scope: scope)
+                continue
+            }
             try markBaselineReconciled(id, scope: scope)
             if try pending.contains(where: { rowID($0) == id }) || hasLocalIntent(id, scope: scope) { continue }
             try applyDeletion(id, scope: scope)
@@ -635,9 +658,16 @@ actor CollectionRecordCodec: ModelActor, SwiftDataRecordCodec {
         return try first(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.collectionID == collectionID && $0.recordName == name })) != nil
     }
 
+    private func isPrivateShadow(_ id: CKRecord.ID, scope: CollaborationDatabaseScope) throws -> Bool {
+        guard scope == .private, id.zoneID.zoneName.hasPrefix("collection-"),
+              let collection = UUID(uuidString: String(id.zoneID.zoneName.dropFirst("collection-".count))) else { return false }
+        return try zones().contains { $0.collectionID == collection && $0.scope == "shared" }
+    }
+
     private func collectionID(for zoneID: CKRecordZone.ID, scope: CollaborationDatabaseScope) throws -> UUID {
         if let locator = try zones().first(where: { $0.zoneName == zoneID.zoneName && $0.ownerName == zoneID.ownerName && $0.scope == scope.rawValue }) { return locator.collectionID }
         guard zoneID.zoneName.hasPrefix("collection-"), let id = UUID(uuidString: String(zoneID.zoneName.dropFirst("collection-".count))) else { throw CollectionCodecError.routingUnavailable }
+        if scope == .private, try zones().contains(where: { $0.collectionID == id && $0.scope == "shared" }) { return id }
         // Discovery supplies a location, never editor authority.
         let zone = CollectionZone(partition: partition, collectionID: id, scope: scope.rawValue, zoneName: zoneID.zoneName, ownerName: zoneID.ownerName)
         zone.roleRawValue = scope == .private ? "owner" : "viewer"

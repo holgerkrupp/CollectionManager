@@ -139,3 +139,12 @@ host performance datasets; earlier iPhone77 unit +2 UI tests passed. All source
 writers are stopped. Agent B is executing existing iPad smoke tests without edits.
 Integration commit is followed by a genuinely fresh remote clone and final
 platform builds/tests; production/account/distribution gates stay open.
+
+Agent C test-only final ownership: new ImportMappingTests.swift covering actual
+column mapping/type inference, conditional status/default provenance, malformed
+input policy and metadata/date/tag mapping. No production files or test runners;
+coordinator executes once all platform test launches finish.
+
+## Final environment boundary
+
+Coordinator owns startup policy/UI and canonical zone routing. Agent A owns only new StoreEnvironmentPolicyTests.swift; acceptance: explicit legacy choice, wrong-environment refusal, corrupt-marker recovery and complete export. Agent B owns RELEASE-QUALITY.md evidence refresh only. All other agent writers remain frozen.

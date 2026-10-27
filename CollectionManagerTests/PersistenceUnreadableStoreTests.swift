@@ -16,7 +16,9 @@ final class PersistenceUnreadableStoreTests: XCTestCase {
         }
         try manager.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.path)
         guard !manager.isReadableFile(atPath: store.path) else { throw XCTSkip("Host bypasses POSIX read permissions") }
-        XCTAssertThrowsError(try PersistentStoreBootstrap.makeContainer(at: store))
+        XCTAssertThrowsError(try PersistentStoreBootstrap.makeContainer(at: store)) {
+            XCTAssertEqual(PersistentStoreBootstrap.failure(for: $0).phase, .recoverableFailure)
+        }
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.path)
         XCTAssertEqual(try Data(contentsOf: store), bytes)
     }

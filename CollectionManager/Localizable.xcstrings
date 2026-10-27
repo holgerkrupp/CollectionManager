@@ -1604,6 +1604,76 @@
           }
         }
       }
+    },
+    "Your existing library is preserved. Check its iCloud environment before opening this build.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your existing library is preserved. Check its iCloud environment before opening this build."
+          }
+        }
+      }
+    },
+    "This development build uses a separate local library and iCloud environment. Your original library stays untouched for the Production build.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This development build uses a separate local library and iCloud environment. Your original library stays untouched for the Production build."
+          }
+        }
+      }
+    },
+    "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure."
+          }
+        }
+      }
+    },
+    "This library is marked for another iCloud environment. Use the matching build; it will not be changed automatically.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This library is marked for another iCloud environment. Use the matching build; it will not be changed automatically."
+          }
+        }
+      }
+    },
+    "This build’s environment": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This build’s environment"
+          }
+        }
+      }
+    },
+    "Create separate development library": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create separate development library"
+          }
+        }
+      }
+    },
+    "Confirm library environment and open": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm library environment and open"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

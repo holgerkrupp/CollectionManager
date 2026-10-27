@@ -35,6 +35,35 @@ or contacts API was found in the current application source. A provider still
 receives the normal network metadata noted above; absence of an analytics SDK
 is not a claim about third-party server retention.
 
+## Local library environment separation
+
+Local stores are separated as well as CloudKit engine state. Relative to the
+application's Application Support directory, Debug uses
+`CollectionManager/Development/CollectionManager.store` with Development iCloud.
+Production keeps the original `CollectionManager/CollectionManager.store` path
+with Production iCloud. Choosing a build does not move or copy the other
+library into its environment.
+
+An older unmarked library at the Production path requires an explicit
+**Confirm library environment and open** decision before it can open. The
+recovery screen identifies this build's expected environment and offers a store
+copy first; Retry alone does not authorize the choice. The environment marker
+is written only after the store opens successfully.
+
+If Debug has no separate Development store and an original library exists, the
+recovery screen requires **Create separate development library** before creating
+one. This also covers an original library whose environment is unknown: Debug
+does not guess its environment or upload that original graph to Development.
+An existing unmarked target store likewise requires explicit environment review.
+A valid marker naming the opposite environment cannot be overridden by either
+confirmation or Retry; use the matching build. No recovery path automatically
+relabels, deletes, or recreates that library.
+
+Environment-policy checks used isolated temporary stores. No actual existing
+user library was opened, relabeled, migrated, moved, or deleted during this
+validation. Signed environment separation and real-account compatibility remain
+release gates below; source checks do not establish those results.
+
 ## Implemented accessibility and localization changes
 
 - Onboarding pages scroll instead of clipping their title/body at large text
@@ -64,9 +93,9 @@ xcodebuild -exportLocalizations -project CollectionManager.xcodeproj -sdk iphone
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The checked-in catalog is the union of native macOS and iOS exports (467 keys
-at this audit), retained as manual entries so exporting one platform cannot remove
-the other's strings. Refresh both exports and review their union when UI changes.
+The checked-in catalog contains 475 keys, including seven environment-recovery
+strings added after the platform-export union. Entries are retained manually so
+exporting one platform cannot remove the other's strings. Refresh both exports and review their union when UI changes.
 Review catalog diffs; do not ship generated sample strings or claim untranslated
 entries are complete. Inspect the built bundle's localized `InfoPlist.strings`
 for `NSCameraUsageDescription` as part of the release build check.

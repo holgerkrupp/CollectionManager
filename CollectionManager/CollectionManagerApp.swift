@@ -171,7 +171,7 @@ extension Notification.Name {
                         }
                         .onOpenURL { [store] url in Task { await store.acceptShare(from: url) } }
                 } else if let startupFailure {
-                    StoreRecoveryView(failure: startupFailure, retry: retryStore)
+                    StoreRecoveryView(failure: startupFailure, retry: retryStore, selectEnvironment: confirmStoreEnvironment)
                 } else {
                     ProgressView("Opening your library…")
                 }
@@ -182,7 +182,7 @@ extension Notification.Name {
             if container != nil {
                 SettingsView().environment(appStore)
             } else if let startupFailure {
-                StoreRecoveryView(failure: startupFailure, retry: retryStore)
+                StoreRecoveryView(failure: startupFailure, retry: retryStore, selectEnvironment: confirmStoreEnvironment)
             }
         }
 
@@ -208,9 +208,11 @@ extension Notification.Name {
         #endif
     }
 
-    private func retryStore() {
+    private func retryStore() { openStore(allowEnvironmentSelection: false) }
+    private func confirmStoreEnvironment() { openStore(allowEnvironmentSelection: true) }
+    private func openStore(allowEnvironmentSelection: Bool) {
         do {
-            let openedContainer = try PersistentStoreBootstrap.makeContainer()
+            let openedContainer = try PersistentStoreBootstrap.makeContainer(allowEnvironmentSelection: allowEnvironmentSelection)
             container = openedContainer
             startupFailure = nil
             store.configure(context: openedContainer.mainContext, container: openedContainer)

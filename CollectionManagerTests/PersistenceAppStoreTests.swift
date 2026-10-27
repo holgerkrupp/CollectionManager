@@ -1,10 +1,37 @@
 import XCTest
 import SwiftData
+import CloudKit
 @testable import CollectionManager
 
 @MainActor final class PersistenceAppStoreTests: XCTestCase {
     func testUnopenedStoreCannotServiceBackgroundIntent() {
         XCTAssertThrowsError(try AppStore().beginIntentOperation())
+    }
+
+    func testOpenStoreObservesActorImportAndCanRestoreAnEarlierValue() async throws {
+        let container = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let store = AppStore()
+        store.configure(context: container.mainContext, container: container)
+        XCTAssertTrue(store.addCollection(name: "Initial", icon: "books.vertical", subtitle: ""))
+        let collection = try XCTUnwrap(store.collections.first)
+        let codec = CollectionRecordCodec(modelContainer: container, containerIdentifier: "iCloud.example.cache-test", environment: .development, accountPartitionIdentifier: "synthetic-account")
+        try await codec.beginHandoff()
+        _ = try await codec.stageRepositoryMutations()
+        let changes = try await codec.pendingLocalChanges(in: .private)
+        let id = try XCTUnwrap(changes.first?.recordID)
+        let pending = try await codec.record(for: id, in: .private)
+        let root = try XCTUnwrap(pending)
+        try await codec.acknowledgeSentChanges(savedRecords: [root], deletedRecordIDs: [], in: .private)
+        root["name"] = "Remote"; root["updatedAt"] = Date().addingTimeInterval(100)
+        try await codec.applyRemoteChanges(records: [root], deletedRecordIDs: [], in: .private)
+        store.loadCollections()
+        XCTAssertEqual(store.collections.first?.name, "Remote")
+        var restored = try XCTUnwrap(store.collections.first)
+        XCTAssertEqual(restored.id, collection.id)
+        restored.name = "Initial"
+        XCTAssertTrue(store.updateCollection(restored))
+        let persisted = try ModelContext(container).fetch(FetchDescriptor<CollectionRecord>()).first
+        XCTAssertEqual(persisted?.name, "Initial")
     }
 
     func testFailedRatingSaveReturnsFailureWithoutOptimisticRating() throws {

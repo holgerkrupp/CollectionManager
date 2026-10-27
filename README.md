@@ -13,7 +13,7 @@ Use **Xcode 27.1 / Swift 6.4 or newer**. The 1.0 target declares iPhone/iPad
 `CollectionManager.xctestplan`; `Production` archives Release.
 
 CloudKitCollaborationKit is a remote package pinned to
-`5e9a09d7af84f4be9c7df7908c13c9ccfd35af82`; `Package.resolved` is committed.
+`1bdf33bb4b2d82e4c1782ba905ace0d132f545a4`; `Package.resolved` is committed.
 No sibling repository is required. The symbol picker is bundled locally.
 
 ```sh
@@ -123,3 +123,5 @@ Production schema deployment, signed multi-account invitation/permission/revocat
 and mixed-client validation, physical-device accessibility/performance, provider
 revocation, distribution validation and App Store disclosures remain real gates.
 Do not call #10, #16 or #17 complete based on mocks, unsigned builds or procedures.
+
+Debug uses a separate `Development/CollectionManager.store` under the application support directory; Release keeps the original library path. Older unmarked libraries require explicit environment confirmation before opening. A known opposite environment is never overridden. Recovery exports include the environment marker alongside SQLite members. Creating a separate development library leaves the original library untouched.

@@ -145,7 +145,7 @@ import SwiftData
     }
 
     private func discoverZones(_ codec: CollectionRecordCodec) async throws {
-        for (scope, database) in [(CollaborationDatabaseScope.private, cloudContainer.privateCloudDatabase), (.shared, cloudContainer.sharedCloudDatabase)] {
+        for (scope, database) in [(CollaborationDatabaseScope.shared, cloudContainer.sharedCloudDatabase), (.private, cloudContainer.privateCloudDatabase)] {
             for zone in try await database.allRecordZones() where zone.zoneID.zoneName.hasPrefix("collection-") {
                 guard let id = UUID(uuidString: String(zone.zoneID.zoneName.dropFirst("collection-".count))) else { continue }
                 if scope == .private { preparedPrivateZones.insert(zone.zoneID) }

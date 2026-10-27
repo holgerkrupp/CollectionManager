@@ -14,13 +14,27 @@ struct StoreStartupFailure: LocalizedError, Sendable {
     let phase: StoreStartupPhase
     let storeURL: URL
     let errorType: String
+    var requiredChoice: LibraryStoreChoice = .none
+    var expectedEnvironment: LibraryStoreEnvironment? = nil
 
     var errorDescription: String? {
-        "Collection Manager could not open its persistent library. Your existing store files were not deleted or replaced."
+        if requiredChoice != .none {
+            return String(localized: "Your existing library is preserved. Check its iCloud environment before opening this build.")
+        }
+        return "Collection Manager could not open its persistent library. Your existing store files were not deleted or replaced."
     }
 
     var recoveryMessage: String {
-        switch phase {
+        switch requiredChoice {
+        case .createDevelopmentLibrary:
+            return String(localized: "This development build uses a separate local library and iCloud environment. Your original library stays untouched for the Production build.")
+        case .confirmExistingEnvironment:
+            return String(localized: "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure.")
+        case .mismatchedEnvironment:
+            return String(localized: "This library is marked for another iCloud environment. Use the matching build; it will not be changed automatically.")
+        case .none: break
+        }
+        return switch phase {
         case .recoverableFailure:
             "Retry after checking available disk space, file permissions, or an iCloud/account transition."
         case .unrecoverableFailure:
@@ -38,6 +52,25 @@ enum PersistentStoreBootstrap {
     private static let testStoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("CollectionManager-tests-\(UUID().uuidString)", isDirectory: true)
     #endif
 
+    static var libraryEnvironment: LibraryStoreEnvironment {
+        #if DEBUG
+        .development
+        #else
+        .production
+        #endif
+    }
+    private static var baseDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CollectionManager", isDirectory: true)
+    }
+    private static var isTestProcess: Bool {
+        #if DEBUG
+        let process = ProcessInfo.processInfo
+        return NSClassFromString("XCTestCase") != nil || process.environment["XCTestConfigurationFilePath"] != nil || process.environment["XCTestBundlePath"] != nil || process.arguments.contains("--ui-testing")
+        #else
+        false
+        #endif
+    }
+
     static var storeURL: URL {
         #if DEBUG
         let process = ProcessInfo.processInfo
@@ -51,17 +84,29 @@ enum PersistentStoreBootstrap {
             return testStoreDirectory.appendingPathComponent("CollectionManager.store")
         }
         #endif
-        let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return applicationSupport.appendingPathComponent("CollectionManager", isDirectory: true).appendingPathComponent("CollectionManager.store")
+        return StoreEnvironmentPolicy.storeURL(baseDirectory: baseDirectory, environment: libraryEnvironment)
     }
 
-    static func makeContainer(at storeURL: URL = storeURL) throws -> ModelContainer {
+    static func makeContainer(at storeURL: URL = storeURL, allowEnvironmentSelection: Bool = false) throws -> ModelContainer {
+        let managesEnvironment = !isTestProcess && storeURL.standardizedFileURL == self.storeURL.standardizedFileURL
+        if managesEnvironment {
+            try StoreEnvironmentPolicy.validate(store: storeURL,
+                legacyStore: StoreEnvironmentPolicy.storeURL(baseDirectory: baseDirectory, environment: .production),
+                environment: libraryEnvironment, userConfirmed: allowEnvironmentSelection)
+        }
         let directory = storeURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: storeURL.path) {
+            guard FileManager.default.isReadableFile(atPath: storeURL.path) else { throw CocoaError(.fileReadNoPermission) }
+            guard FileManager.default.isWritableFile(atPath: storeURL.path) else { throw CocoaError(.fileWriteNoPermission) }
+        }
+        guard FileManager.default.isWritableFile(atPath: directory.path) else { throw CocoaError(.fileWriteNoPermission) }
         let configuration = ModelConfiguration(url: storeURL, cloudKitDatabase: .none)
         do {
             let schema = Schema(CollectionManagerSchemaV2.models)
-            return try ModelContainer(for: schema, migrationPlan: CollectionManagerMigrationPlan.self, configurations: configuration)
+            let container = try ModelContainer(for: schema, migrationPlan: CollectionManagerMigrationPlan.self, configurations: configuration)
+            if managesEnvironment { try StoreEnvironmentPolicy.record(libraryEnvironment, for: storeURL) }
+            return container
         } catch {
             logger.error("Persistent store initialization failed: \(String(describing: type(of: error)), privacy: .public)")
             throw error
@@ -69,8 +114,12 @@ enum PersistentStoreBootstrap {
     }
 
     static func failure(for error: Error) -> StoreStartupFailure {
+        if let review = error as? LibraryStoreEnvironmentReview {
+            return StoreStartupFailure(phase: .recoverableFailure, storeURL: review.existingStoreURL,
+                errorType: "Library environment review", requiredChoice: review.choice, expectedEnvironment: review.expected)
+        }
         let nsError = error as NSError
-        let recoverable = nsError.domain == NSCocoaErrorDomain && [NSFileReadNoPermissionError, NSFileWriteNoPermissionError, NSFileNoSuchFileError, NSFileLockingError].contains(nsError.code)
+        let recoverable = nsError.domain == NSCocoaErrorDomain && [NSFileReadNoPermissionError, NSFileWriteNoPermissionError, NSFileNoSuchFileError, NSFileLockingError, NSFileWriteOutOfSpaceError].contains(nsError.code)
         return StoreStartupFailure(phase: recoverable ? .recoverableFailure : .unrecoverableFailure, storeURL: storeURL, errorType: String(describing: type(of: error)))
     }
 
@@ -80,7 +129,7 @@ enum PersistentStoreBootstrap {
     static func makeSafeExport(from sourceURL: URL = storeURL, into destination: URL = FileManager.default.temporaryDirectory) throws -> URL {
         let manager = FileManager.default
         let exportDirectory = destination.appendingPathComponent("CollectionManager-store-\(UUID().uuidString)", isDirectory: true)
-        let candidates = [sourceURL, URL(fileURLWithPath: sourceURL.path + "-wal"), URL(fileURLWithPath: sourceURL.path + "-shm")]
+        let candidates = [sourceURL, URL(fileURLWithPath: sourceURL.path + "-wal"), URL(fileURLWithPath: sourceURL.path + "-shm"), StoreEnvironmentPolicy.markerURL(for: sourceURL)]
         guard manager.fileExists(atPath: sourceURL.path) else { throw CocoaError(.fileNoSuchFile) }
         let before = try storeMemberSignatures(candidates)
         try manager.createDirectory(at: exportDirectory, withIntermediateDirectories: false)
@@ -113,6 +162,7 @@ enum PersistentStoreBootstrap {
 struct StoreRecoveryView: View {
     let failure: StoreStartupFailure
     let retry: () -> Void
+    var selectEnvironment: (() -> Void)? = nil
     @State private var exportURL: URL?
     @State private var exportError: String?
 
@@ -131,11 +181,19 @@ struct StoreRecoveryView: View {
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+            if let environment = failure.expectedEnvironment { LabeledContent("This build’s environment", value: environment.rawValue) }
+            if let selectEnvironment {
+                if failure.requiredChoice == .createDevelopmentLibrary {
+                    Button("Create separate development library", action: selectEnvironment).buttonStyle(.borderedProminent)
+                } else if failure.requiredChoice == .confirmExistingEnvironment {
+                    Button("Confirm library environment and open", action: selectEnvironment).buttonStyle(.borderedProminent)
+                }
+            }
             HStack {
                 Button("Retry", action: retry)
                     .buttonStyle(.borderedProminent)
                 Button("Export store copy") {
-                    do { exportURL = try PersistentStoreBootstrap.makeSafeExport() }
+                    do { exportURL = try PersistentStoreBootstrap.makeSafeExport(from: failure.storeURL) }
                     catch { exportError = "The store copy could not be prepared." }
                 }
                 .buttonStyle(.bordered)

@@ -45,7 +45,8 @@ CloudKit retry-after. Background work uses the same main-app transport owner.
 Remote records/deletes commit before engine serialization can advance. Remote
 commits do not create local outbox echoes. A failed local apply/state save stops
 that engine instance; restart uses unchanged durable state and replays its journal.
-Record materialization failure retains the whole pending batch. The kit also
+Record materialization failure retains the whole pending batch. The host explicitly opts into `DurableSwiftDataRecordCodec`; existing package
+consumers retain their original delegate dispatch. The kit also
 serializes startup/shutdown so concurrent native acceptance cannot create a
 second engine pair. The Core Data backend remains unchanged.
 
@@ -97,3 +98,13 @@ checksum validation and canonical leading-zero normalization; compressed strings
 are not guessed as UPC-E when the symbology is unknown. Tests use the primary
 [GS1 General Specifications §5.2.2.4](https://ref.gs1.org/standards/genspecs/24.0.0/)
 zero-suppression examples. Existing canonical record values remain readable.
+
+### Earlier private duplicates of joined collections
+
+The joined location is canonical even when an earlier client created a private
+copy with the same collection UUID. Private copy records are quarantined for
+review, never applied to the joined graph, never used to grant owner access, and
+never replayed to a different scope automatically. Private-copy deletions cannot
+delete joined rows. Conflicting joined owners for the same root ID fail closed
+without replacing the retained share locator. Those exceptional migrations need
+owner review with signed accounts; all existing server data/shares stay intact.

@@ -39,6 +39,56 @@ import CollaborationCore
         return record
     }
 
+    func testPrivateShadowCannotGrantAccessOverwriteOrDeleteJoinedData() async throws {
+        let (container, actor, collectionID, privateZone) = try await setup()
+        let sharedZone = CKRecordZone.ID(zoneName: privateZone.zoneName, ownerName: "synthetic-owner")
+        try await actor.registerCollection(collectionID: collectionID, zoneID: sharedZone, scope: .shared, role: .viewer)
+        let child = item(collectionID: collectionID, zone: sharedZone, title: "Joined value")
+        try await actor.applyRemoteChanges(records: [child], deletedRecordIDs: [], in: .shared)
+        let shadowRoot = CKRecord(recordType: "Collection", recordID: CKRecord.ID(recordName: collectionID.uuidString, zoneID: privateZone))
+        shadowRoot["name"] = "Private shadow"; shadowRoot["updatedAt"] = Date.distantFuture
+        let shadowChild = item(try XCTUnwrap(UUID(uuidString: child.recordID.recordName)), collectionID: collectionID, zone: privateZone, title: "Wrong private value", time: 9_999)
+        try await actor.applyRemoteChanges(records: [shadowRoot, shadowChild], deletedRecordIDs: [], in: .private)
+        try await actor.applyRemoteChanges(records: [], deletedRecordIDs: [shadowChild.recordID], in: .private)
+        let repository = CollectionRepository(context: ModelContext(container))
+        let collection = try XCTUnwrap(repository.collections().first)
+        XCTAssertEqual(collection.name, "Fixture"); XCTAssertEqual(collection.role, .viewer)
+        XCTAssertEqual(try repository.items(in: collectionID).first?.title, "Joined value")
+        let privateZones = try await actor.knownZones(in: .private)
+        XCTAssertTrue(privateZones.isEmpty)
+        let candidates = try await actor.legacyCandidates()
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertFalse(try XCTUnwrap(candidates.first).canUpload)
+        do { try await actor.authorizeBaselineUpload(snapshotID: candidates[0].id); XCTFail("A private shadow cannot authorize a shared write") }
+        catch { XCTAssertTrue(error is RepositoryError) }
+    }
+
+    func testConflictingJoinedLocationsDoNotReplaceExistingShareLocator() async throws {
+        let (_, actor, collectionID, privateZone) = try await setup()
+        let original = CKRecordZone.ID(zoneName: privateZone.zoneName, ownerName: "synthetic-owner-A")
+        let conflicting = CKRecordZone.ID(zoneName: privateZone.zoneName, ownerName: "synthetic-owner-B")
+        try await actor.registerCollection(collectionID: collectionID, zoneID: original, scope: .shared, role: .viewer)
+        do { try await actor.registerCollection(collectionID: collectionID, zoneID: conflicting, scope: .shared, role: .editor); XCTFail("Conflicting shares must not replace stable routing") }
+        catch { XCTAssertTrue(error is CollectionCodecError) }
+        let retained = try await actor.knownZones(in: .shared)
+        XCTAssertEqual(retained, [original])
+    }
+
+    func testExplicitAcknowledgedDeleteResolvesOnlyItsOwnLegacyCandidate() async throws {
+        let (container, actor, collectionID, zone) = try await setup()
+        let context = ModelContext(container)
+        let local = CollectionPerformanceFixture.items(count: 1, collectionID: collectionID)[0]
+        context.insert(ItemRecord(from: local)); try context.save()
+        while try await actor.bootstrapPage(limit: 20) { }
+        let before = try await actor.unreconciledBaselineCount(); XCTAssertEqual(before, 2)
+        let repository = CollectionRepository(context: ModelContext(container))
+        try repository.deleteItem(local)
+        _ = try await actor.stageRepositoryMutations()
+        try await actor.acknowledgeSentChanges(savedRecords: [], deletedRecordIDs: [CKRecord.ID(recordName: local.id.uuidString, zoneID: zone)], in: .private)
+        let after = try await actor.unreconciledBaselineCount(); XCTAssertEqual(after, 1)
+        XCTAssertTrue(try repository.items(in: collectionID).isEmpty)
+    }
+
     func testOnlyExplicitNewCollectionIntentAuthorizesZoneCreation() async throws {
         let (container, actor, legacyID, _) = try await setup()
         let initiallyAuthorized = try await actor.authorizedNewPrivateZones()
