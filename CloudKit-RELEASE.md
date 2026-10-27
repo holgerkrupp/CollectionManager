@@ -4,10 +4,12 @@ The app uses the container `iCloud.de.holgerkrupp.CollectionManager`. Debug uses
 
 Before a release:
 
+Older unmarked libraries stop for explicit environment confirmation. Confirm the historical library belongs to Production before opening it in Release. Debug offers a separate Development library and preserves the original; do not relabel/copy a Development graph into Production as automatic recovery. Preserve the `.environment` marker with SQLite sidecars in recovery copies.
+
 1. Build a clean Release archive and inspect the signed entitlements. Confirm the container identifier and Production environment.
 2. Review `Collection`, `CollectionItem`, `CollectionEvent`, `CollectionItemRating`, and `CollectionItemComment`, including settings JSON fields and asset fields. Add queryable/sortable indexes only where the deployed implementation requires them.
 3. Test schema changes in Development with a fixture created by the previous released build. Deploy the reviewed schema to Production from CloudKit Dashboard. Never make a Development-only field a release dependency.
-4. Run the multi-account matrix: owner creates/shares; editor accepts and edits; viewer accepts and is rejected locally; items, settings, ratings, comments and photos converge; offline edits and delete-vs-edit conflicts converge deterministically; revocation and leaving a share remove only the affected shared collection.
+4. Run the multi-account matrix: owner creates/shares; editor accepts and edits; viewer accepts and is rejected locally; items, settings, ratings, comments and photos converge; offline edits and delete-vs-edit conflicts converge deterministically; revocation and leaving a share make only the affected shared collection unavailable/read-only while preserving its recovery data.
 5. Test accepting an invitation while the app is closed and while it is already running, plus iCloud sign-out/sign-in, temporary account unavailability, reinstall, and restore.
 
 Record the date, build number, schema deployment, Apple IDs/test roles (without storing credentials), device/OS versions, and known limitations with the release candidate. Production deployment and real-account verification cannot be simulated by the local unit test suite.
@@ -43,3 +45,5 @@ Verify both locally and on CloudKit with real accounts. Do not downgrade an olde
 binary against the upgraded V2 store as automatic recovery. Preserve a complete
 copy and pending work; backward binary compatibility and mixed old/new clients
 require explicit validation before rollout.
+
+For a historical library without a transport owner marker, verify that the currently signed-in Apple Account is its original account before confirming the recovery prompt. The old schema did not record an authoritative account identity; confirmation is a required manual migration gate. Once bound, account switches fail closed and retain pending work.

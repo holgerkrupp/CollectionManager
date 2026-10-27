@@ -154,7 +154,8 @@ extension Notification.Name {
                     RootView()
                         .environment(appStore)
                         .task(id: scenePhase) {
-                            guard scenePhase == .active, !Self.isRunningTests else { return }
+                            guard scenePhase == .active else { return }
+                            if Self.isRunningTests { store.load(); return }
                             store.configure(context: container.mainContext, container: container)
                             CloudShareInvitationInbox.shared.install { metadata in
                                 await store.acceptShare(metadata: metadata)

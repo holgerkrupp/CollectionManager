@@ -11,8 +11,7 @@ sessions, package-based SwiftData collaboration/native UI, durable journal and
 handoff, background queries, bounded image thumbnails and host benchmarks.
 See README and docs/VALIDATION.md for precise evidence and limitations.
 
-Remaining gates are tracked in #3–#17 as appropriate: real permission-denied
-filesystem testing; provider credential revocation (#6); signed existing/new share,
+Remaining gates are tracked in #6–#17 as appropriate: provider credential revocation (#6); signed existing/new share,
 role/revoke/leave/offline/mixed-client/production schema matrix (#9/#10/#17);
 UI runtime authorization and compatible CI host (#11); measured device/frame/image
 memory/network scale acceptance (#12); device accessibility/RTL/long-string,

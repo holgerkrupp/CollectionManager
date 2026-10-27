@@ -148,3 +148,15 @@ coordinator executes once all platform test launches finish.
 ## Final environment boundary
 
 Coordinator owns startup policy/UI and canonical zone routing. Agent A owns only new StoreEnvironmentPolicyTests.swift; acceptance: explicit legacy choice, wrong-environment refusal, corrupt-marker recovery and complete export. Agent B owns RELEASE-QUALITY.md evidence refresh only. All other agent writers remain frozen.
+
+## Caller completion audit
+
+Agent C owns only CollectionSettingsWindow.swift, ItemViews.swift, HTMLImportView.swift and TagManagementView.swift at their actual Views paths. Acceptance: keep editors open and do not run dependent tag/import updates when AppStore persistence returns failure; distinguish valid zero-update from failure. No tests/Git mutations. Coordinator reviews and serializes final verification. Other writers remain frozen.
+
+Coordinator additionally owns CollectionManagerUITests.swift for a real iPad representation/rotation draft smoke test. Acceptance: unsaved table input survives cards/table and orientation changes; explicit Revert clears it without insertion. This supplements multi-field deterministic tests; Mac/Split View/device checks remain separate.
+
+Agent B owns only new CollectionManagerUITests/ReleaseFlowsUITests.swift. Acceptance: practical isolated iOS UI coverage for CSV review, collection settings, filter/sort, Settings/provider and permission/error/share-opening states using existing public flows. No production/network/account claims, no app source changes, no runners/Git. Coordinator alone runs/reviews. Existing core smoke file remains coordinator-owned.
+
+Coordinator owns CollectionDetailView.swift test fixture entry: Debug plus --ui-testing and CM_TEST_CSV_FIXTURE=basic replaces only the system picker selection with a bounded known CSV. Real parser/mapping/review/import remain exercised against isolated test store. Release has no fixture entry. Agent B may use this agreed fake.
+
+Final UI follow-through: all agent files frozen. Coordinator restored local reloads in UI-test mode, isolated mutable layout preferences, removed nested settings navigation, and added in-form save feedback. CI now selects actual installed iPhone/iPad device types and runs their suites after Mac tests. Final evidence is recorded only after passing runs.

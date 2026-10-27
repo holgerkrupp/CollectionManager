@@ -68,6 +68,8 @@ struct HTMLMappingView: View {
     @State private var generateTagsFromTitle = false
     @State private var titleTagMode: TitleTagMode = .firstSegment
     @State private var titleSeparators = "-–—_:|/,"
+    @State private var pendingBackgroundSync: PendingBackgroundSync?
+    @State private var backgroundSyncMessage: String?
 
     init(table: HTMLImportTable, sourceURL: String = "") { self.table = table; self.sourceURL = sourceURL; _mapping = State(initialValue: Array(repeating: .ignore, count: table.headers.count)) }
 
@@ -122,6 +124,12 @@ struct HTMLMappingView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Background web sync") {
+                if let backgroundSyncMessage {
+                    Text(backgroundSyncMessage).font(.footnote).foregroundStyle(.secondary)
+                }
+                if pendingBackgroundSync != nil {
+                    Button("Retry saving background sync") { savePendingBackgroundSync() }
+                }
                 Toggle("Save these settings for background sync", isOn: $saveForBackgroundSync)
                     .disabled(!canSaveBackgroundSync)
                 if saveForBackgroundSync {
@@ -169,7 +177,7 @@ struct HTMLMappingView: View {
         let prepared = HTMLImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: fields, conditionalRules: conditionalRules, validStatusIDs: Set(store.statuses.map(\.id)))
         var drafts = prepared.drafts
         if let fixedState {
-            for index in drafts.indices { drafts[index].state = fixedState }
+            for index in drafts.indices { drafts[index].state = fixedState; drafts[index].stateWasExplicit = true }
         }
         for index in drafts.indices {
             drafts[index].tags = TagUtilities.tags(title: drafts[index].title, existing: drafts[index].tags, rawTags: drafts[index].tags.joined(separator: ","), options: tagOptions)
@@ -192,9 +200,47 @@ struct HTMLMappingView: View {
         return (url.scheme == "http" || url.scheme == "https") && store.selectedCollection != nil && mapping.contains(.standard(.title))
     }
 
+    private struct PendingBackgroundSync {
+        let collectionID: UUID
+        let urlString: String
+        let tableName: String
+        let headers: [String]
+        let mapping: [ImportColumnDestination]
+        let conditionalRules: [ConditionalMappingRule]
+        let intervalMinutes: Int
+        let addNewItems: Bool
+        let updateExistingStates: Bool
+        let fixedState: ItemState?
+        let tagOptions: TagGenerationOptions
+
+        func makeRecord() -> WebSyncRecord {
+            WebSyncRecord(collectionID: collectionID, urlString: urlString, tableName: tableName,
+                          headers: headers, mapping: mapping, conditionalRules: conditionalRules,
+                          intervalMinutes: intervalMinutes, addNewItems: addNewItems,
+                          updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions)
+        }
+    }
+
     private func saveBackgroundSyncIfNeeded(preparation: ImportPreparation) {
         guard saveForBackgroundSync, canSaveBackgroundSync, let collectionID = store.selectedCollection?.id else { return }
-        store.saveWebSync(WebSyncRecord(collectionID: collectionID, urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name, headers: table.headers, mapping: resolvedMapping(using: preparation.newMetadataFields), conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems, updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions))
+        pendingBackgroundSync = PendingBackgroundSync(collectionID: collectionID,
+            urlString: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines), tableName: table.name,
+            headers: table.headers, mapping: resolvedMapping(using: preparation.newMetadataFields),
+            conditionalRules: conditionalRules, intervalMinutes: intervalMinutes, addNewItems: addNewItems,
+            updateExistingStates: updateExistingStates, fixedState: fixedState, tagOptions: tagOptions)
+        savePendingBackgroundSync()
+    }
+
+    private func savePendingBackgroundSync() {
+        guard let pendingBackgroundSync else { return }
+        // Each retry creates a new model: a failed transaction may invalidate
+        // its inserted model, but this value-only configuration remains safe.
+        guard store.saveWebSync(pendingBackgroundSync.makeRecord()) else {
+            backgroundSyncMessage = String(localized: "Your items were imported, but background sync settings could not be saved. The imported items remain in your library. Retry saving these settings here.")
+            return
+        }
+        self.pendingBackgroundSync = nil
+        backgroundSyncMessage = String(localized: "Your items were imported and background sync settings are saved.")
     }
 
     private func resolvedMapping(using newFields: [MetadataFieldDefinition]) -> [ImportColumnDestination] {

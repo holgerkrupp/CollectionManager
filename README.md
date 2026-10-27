@@ -66,6 +66,20 @@ and store-copy export, including actual SQLite `-wal`/`-shm` members. It never
 replaces, resets or deletes the original store. App Intents/background scheduling
 are installed only after the persistent store opens.
 
+
+Debug uses a separate `Development/CollectionManager.store` under the application
+support directory; Release keeps the original library path. Older unmarked libraries
+require explicit environment/account confirmation before opening. A known opposite
+environment is never overridden. Recovery exports include the environment marker
+alongside SQLite members. Creating a separate development library leaves the
+original library untouched.
+
+For a historical library without a transport owner marker, verify that the currently
+signed-in Apple Account is its original account before confirming the recovery
+prompt. The old schema did not record an authoritative account identity;
+confirmation is a required manual migration gate. Once bound, account switches fail
+closed and retain pending work.
+
 Outgoing payloads/deletes remain durable until their own upload generation is
 acknowledged. Fetched changes commit before engine progress can advance. The kit
 stops progress on local commit failure and resumes from durable state after
@@ -123,5 +137,3 @@ Production schema deployment, signed multi-account invitation/permission/revocat
 and mixed-client validation, physical-device accessibility/performance, provider
 revocation, distribution validation and App Store disclosures remain real gates.
 Do not call #10, #16 or #17 complete based on mocks, unsigned builds or procedures.
-
-Debug uses a separate `Development/CollectionManager.store` under the application support directory; Release keeps the original library path. Older unmarked libraries require explicit environment confirmation before opening. A known opposite environment is never overridden. Recovery exports include the environment marker alongside SQLite members. Creating a separate development library leaves the original library untouched.

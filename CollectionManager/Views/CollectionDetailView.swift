@@ -1,5 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
+
+private enum CollectionLayoutPreferences {
+    static let defaults: UserDefaults = {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing"), let name = ProcessInfo.processInfo.environment["CM_TEST_STORE_NAME"], UUID(uuidString: name) != nil, let isolated = UserDefaults(suiteName: "CollectionManager-UI-layout-" + name) { return isolated }
+        #endif
+        return .standard
+    }()
+}
 import AppIntents
 import TipKit
 
@@ -9,7 +18,7 @@ struct CollectionDetailView: View {
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
-    @AppStorage("collection.layout.usesTable") private var prefersTableLayout = false
+    @AppStorage("collection.layout.usesTable", store: CollectionLayoutPreferences.defaults) private var prefersTableLayout = false
     @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
     @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportFile: CSVParsedFile?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
@@ -84,11 +93,23 @@ struct CollectionDetailView: View {
                 Text(csvImportError ?? "The file could not be read.")
             }
     }
+    private func openCSVImporter() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing"), ProcessInfo.processInfo.environment["CM_TEST_CSV_FIXTURE"] == "basic" {
+            do {
+                csvImportFile = try CollectionImporter().parseFile(Data("Title,Brand,Quantity\r\nCSV fixture item,Example,2\r\n".utf8), fileName: "UI-fixture.csv")
+            } catch { csvImportError = error.localizedDescription }
+            return
+        }
+        #endif
+        showingImporter = true
+    }
+
     private var moreMenu: some View {
         Menu {
             Group {
                 Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }
-                Button { showingImporter = true } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }
+                Button { openCSVImporter() } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }
                 Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }
                 Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }
                 Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }

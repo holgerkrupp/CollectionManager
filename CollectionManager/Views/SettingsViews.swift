@@ -119,7 +119,7 @@ struct SettingsView: View {
             }
             .confirmationDialog("Remove duplicate items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
                 Button("Remove Duplicates", role: .destructive) {
-                    let removed = store.deduplicateItems()
+                    guard let removed = store.deduplicateItems() else { deduplicationMessage = nil; return }
                     deduplicationMessage = removed == 0 ? "No duplicates found." : "Removed \(removed) duplicate item\(removed == 1 ? "" : "s")."
                 }
                 Button("Cancel", role: .cancel) {}
@@ -158,101 +158,99 @@ struct CollectionSettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    ForEach($statuses) { $status in
-                        NavigationLink {
-                            StatusEditorView(status: $status)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: status.symbol).foregroundStyle(status.color.color)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(status.name.isEmpty ? "Unnamed status" : status.name)
-                                }
-                            }
-                        }
-                    }
-                    .onDelete { offsets in
-                        guard statuses.count - offsets.count >= 1 else { return }
-                        statuses.remove(atOffsets: offsets)
-                    }
-                    .onMove { statuses.move(fromOffsets: $0, toOffset: $1) }
-
-                    Button { statuses.append(CollectionStatus(name: "New status", color: .indigo, symbol: "circle")) } label: {
-                        Label("Add status", systemImage: "plus.circle.fill")
-                    }
-                } header: {
-                    Text("Statuses")
-                } footer: {
-                    Text("Tap a status to edit it. Use Edit to reorder or remove statuses. Removing one moves its existing items to the first remaining status.")
-                }
-
-                Section {
-                    ForEach($metadataFields) { $field in
-                        NavigationLink {
-                            MetadataFieldDefinitionEditorView(field: $field)
-                        } label: {
-                            HStack {
-                                Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
-                                Spacer()
-                                if field.showsInItemRows {
-                                    Image(systemName: "eye.fill")
-                                        .foregroundStyle(.secondary)
-                                        .accessibilityLabel("Shown in item rows")
-                                }
-                            }
-                        }
-                    }
-                    .onDelete { metadataFields.remove(atOffsets: $0) }
-                    .onMove { metadataFields.move(fromOffsets: $0, toOffset: $1) }
-
-                    Button {
-                        metadataFields.append(MetadataFieldDefinition())
+        Form {
+            Section {
+                ForEach($statuses) { $status in
+                    NavigationLink {
+                        StatusEditorView(status: $status)
                     } label: {
-                        Label("Add metadata field", systemImage: "plus.circle.fill")
-                    }
-                } header: {
-                    Text("Item metadata")
-                } footer: {
-                    Text("Tap a field to edit it. Use Edit to reorder or remove fields. Custom fields appear when adding or editing every item in this collection. Removing one hides its existing values but does not delete them.")
-                }
-
-                Section("Adding") {
-                    Picker("Default status", selection: $defaultState) {
-                        ForEach(statuses) { status in
-                            Text(status.name).tag(ItemState(rawValue: status.id))
+                        HStack(spacing: 12) {
+                            Image(systemName: status.symbol).foregroundStyle(status.color.color)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(status.name.isEmpty ? "Unnamed status" : status.name)
+                            }
                         }
                     }
-                    Toggle("Require barcode", isOn: $barcodeRequired)
                 }
+                .onDelete { offsets in
+                    guard statuses.count - offsets.count >= 1 else { return }
+                    statuses.remove(atOffsets: offsets)
+                }
+                .onMove { statuses.move(fromOffsets: $0, toOffset: $1) }
 
-                Section {
-                    Toggle("Another user added an item", isOn: $notifySharedItemAdded)
-                        .onChange(of: notifySharedItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Another user removed an item", isOn: $notifySharedItemRemoved)
-                        .onChange(of: notifySharedItemRemoved) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Automatic sync added an item", isOn: $notifyAutomaticSyncItemAdded)
-                        .onChange(of: notifyAutomaticSyncItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                    Toggle("Automatic sync changed a matched item's status", isOn: $notifyAutomaticSyncStatusChanged)
-                        .onChange(of: notifyAutomaticSyncStatusChanged) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
-                } header: {
-                    Text("Notifications")
-                } footer: {
-                    Text("These preferences are stored only on this device and are never included in iCloud sync.")
+                Button { statuses.append(CollectionStatus(name: "New status", color: .indigo, symbol: "circle")) } label: {
+                    Label("Add status", systemImage: "plus.circle.fill")
                 }
+            } header: {
+                Text("Statuses")
+            } footer: {
+                Text("Tap a status to edit it. Use Edit to reorder or remove statuses. Removing one moves its existing items to the first remaining status.")
             }
-            .navigationTitle("Collection settings")
-            .disabled(!collection.role.canEdit)
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .platformLeading) {
-                    EditButton()
+
+            Section {
+                ForEach($metadataFields) { $field in
+                    NavigationLink {
+                        MetadataFieldDefinitionEditorView(field: $field)
+                    } label: {
+                        HStack {
+                            Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
+                            Spacer()
+                            if field.showsInItemRows {
+                                Image(systemName: "eye.fill")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityLabel("Shown in item rows")
+                            }
+                        }
+                    }
                 }
-                #endif
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { save() }
+                .onDelete { metadataFields.remove(atOffsets: $0) }
+                .onMove { metadataFields.move(fromOffsets: $0, toOffset: $1) }
+
+                Button {
+                    metadataFields.append(MetadataFieldDefinition())
+                } label: {
+                    Label("Add metadata field", systemImage: "plus.circle.fill")
                 }
+            } header: {
+                Text("Item metadata")
+            } footer: {
+                Text("Tap a field to edit it. Use Edit to reorder or remove fields. Custom fields appear when adding or editing every item in this collection. Removing one hides its existing values but does not delete them.")
+            }
+
+            Section("Adding") {
+                Picker("Default status", selection: $defaultState) {
+                    ForEach(statuses) { status in
+                        Text(status.name).tag(ItemState(rawValue: status.id))
+                    }
+                }
+                Toggle("Require barcode", isOn: $barcodeRequired)
+            }
+
+            Section {
+                Toggle("Another user added an item", isOn: $notifySharedItemAdded)
+                    .onChange(of: notifySharedItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                Toggle("Another user removed an item", isOn: $notifySharedItemRemoved)
+                    .onChange(of: notifySharedItemRemoved) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                Toggle("Automatic sync added an item", isOn: $notifyAutomaticSyncItemAdded)
+                    .onChange(of: notifyAutomaticSyncItemAdded) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+                Toggle("Automatic sync changed a matched item's status", isOn: $notifyAutomaticSyncStatusChanged)
+                    .onChange(of: notifyAutomaticSyncStatusChanged) { _, enabled in LocalNotificationService.shared.userEnabledNotification(enabled) }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("These preferences are stored only on this device and are never included in iCloud sync.")
+            }
+        }
+        .navigationTitle("Collection settings")
+        .disabled(!collection.role.canEdit)
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .platformLeading) {
+                EditButton()
+            }
+            #endif
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { save() }
             }
         }
     }

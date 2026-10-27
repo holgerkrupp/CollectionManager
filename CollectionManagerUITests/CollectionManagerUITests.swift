@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 final class CollectionManagerUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
@@ -8,7 +11,7 @@ final class CollectionManagerUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-testing", "-onboarding.hasCompleted", onboarding ? "NO" : "YES",
-            "-collection.layout.usesTable", "NO", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"
         ]
         // The app derives the path inside its own temporary container, which
@@ -81,6 +84,35 @@ final class CollectionManagerUITests: XCTestCase {
         delete.tap()
         XCTAssertTrue(app.staticTexts["UI edited item"].firstMatch.waitForNonExistence(timeout: 10))
     }
+
+    #if os(iOS)
+    @MainActor
+    func testTableDraftSurvivesRepresentationAndRotationOnIPad() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Table layout requires regular width")
+        let app = launch(onboarding: false)
+        defer { XCUIDevice.shared.orientation = .portrait; finish(app) }
+        try createCollection(in: app, name: "Adaptive drafts")
+        app.buttons["Table"].firstMatch.tap()
+        let input = app.textFields["Add item…"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap(); input.typeText("Uncommitted draft")
+        app.segmentedControls.buttons["square.grid.2x2"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Unsaved table edits"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Uncommitted draft"].exists)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 10), .completed)
+        app.buttons["Table"].firstMatch.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        XCTAssertEqual(input.value as? String, "Uncommitted draft")
+        app.segmentedControls.buttons["square.grid.2x2"].firstMatch.tap()
+        app.buttons["Revert"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Unsaved table edits"].waitForNonExistence(timeout: 5))
+        app.buttons["Table"].firstMatch.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(input.value as? String, "Uncommitted draft")
+    }
+    #endif
 
     #if os(macOS)
     @MainActor

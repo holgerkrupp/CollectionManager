@@ -72,6 +72,7 @@ private struct CollectionSettingsSplitView: View {
     let collection: CollectionModel
 
     @State private var pane: CollectionSettingsPane? = .general
+    @State private var showingSaveFailure = false
     @State private var name: String
     @State private var subtitle: String
     @State private var icon: String
@@ -134,6 +135,11 @@ private struct CollectionSettingsSplitView: View {
             }
             .navigationTitle(pane?.title ?? "Collection Settings")
             .navigationSubtitle(collection.name)
+        }
+        .alert("Collection settings could not be saved", isPresented: $showingSaveFailure) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Your changes are still in this editor. Check the library error and retry Save.")
         }
     }
 
@@ -430,7 +436,7 @@ private struct CollectionSettingsSplitView: View {
         updated.metadataFields = cleanedFields
         updated.defaultStatusID = cleanedStatuses.contains(where: { $0.id == defaultState.rawValue }) ? defaultState.rawValue : (cleanedStatuses.first?.id ?? ItemState.wanted.rawValue)
         updated.barcodeRequired = barcodeRequired
-        store.updateCollection(updated)
+        guard store.updateCollection(updated) else { showingSaveFailure = true; return }
         // Adopt the normalized values so the editor reflects what was stored
         // and the Save button settles back to its disabled, saved state.
         name = cleanedName

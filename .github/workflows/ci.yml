@@ -38,9 +38,29 @@ jobs:
         run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" CODE_SIGNING_ALLOWED=NO -only-testing:CollectionManagerTests
       - name: Run isolated UI smoke tests
         run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" -only-testing:CollectionManagerUITests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= DEVELOPMENT_TEAM=
+      - name: Select installed iPhone and iPad simulators
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '--json']))['devices']
+          devices = [device for runtime, values in sorted(runtimes.items(), reverse=True) if '.iOS-' in runtime for device in values]
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              for prefix, key in [('iPhone', 'CM_IPHONE'), ('iPad', 'CM_IPAD')]:
+                  device = next((device for device in devices if ('.' + prefix + '-') in device.get('deviceTypeIdentifier', '')), None)
+                  if device is None:
+                      raise SystemExit('Install an available ' + prefix + ' simulator on this Xcode host')
+                  output.write(key + '=' + device['udid'] + '\n')
+          PYTHON
+      - name: Run iPhone unit and UI suites
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPHONE" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPhone-tests"
+      - name: Run native iPad UI suite
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPAD" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPad-tests" -only-testing:CollectionManagerUITests
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: ${{ runner.temp }}/CollectionManager-tests/Logs/Test/*.xcresult
+          path: |
+            ${{ runner.temp }}/CollectionManager-tests/Logs/Test/*.xcresult
+            ${{ runner.temp }}/CollectionManager-iPhone-tests/Logs/Test/*.xcresult
+            ${{ runner.temp }}/CollectionManager-iPad-tests/Logs/Test/*.xcresult

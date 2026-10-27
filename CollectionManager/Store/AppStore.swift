@@ -165,15 +165,16 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; return nil }
     }
-    @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int {
+    @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int? {
         do {
-            guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
-            guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return 0 }
+            guard let repository, let collection = selectedCollection, collection.role.canEdit else { return nil }
+            guard !filteredItems.isEmpty else { return 0 }
+            guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return nil }
             let changed = try repository.bulkUpdateState(for: Set(filteredItems.map(\.id)), in: collection.id, to: state)
             if changed > 0 { loadSelectedCollection() }
             return changed
 
-        } catch { persistenceError = error.localizedDescription; return 0 }
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
     @discardableResult func importDrafts(_ drafts: [ImportDraft]) -> Bool {
         do {
@@ -199,28 +200,28 @@ import SwiftData
             return true
         } catch { persistenceError = error.localizedDescription; return false }
     }
-    func deduplicateItems() -> Int {
+    func deduplicateItems() -> Int? {
         do {
-            guard let repository, let collectionID = selectedCollection?.id else { return 0 }
+            guard let repository, let collectionID = selectedCollection?.id else { return nil }
             let removed = try repository.deduplicateItems(in: collectionID)
             loadSelectedCollection()
             if removed > 0 { Task { await syncCollections() } }
             return removed
 
-        } catch { persistenceError = error.localizedDescription; return 0 }
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
-    func deduplicateImportedItems() -> Int { deduplicateItems() }
-    func deleteAllImportedItems() -> Int {
-        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = try repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed
-        } catch { persistenceError = error.localizedDescription; return 0 }
+    func deduplicateImportedItems() -> Int? { deduplicateItems() }
+    func deleteAllImportedItems() -> Int? {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return nil }; let removed = try repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
-    func applyTagRules(_ options: TagGenerationOptions) -> Int {
-        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = try repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed
-        } catch { persistenceError = error.localizedDescription; return 0 }
+    func applyTagRules(_ options: TagGenerationOptions) -> Int? {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return nil }; let changed = try repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
-    func applyMergedTagsToExistingItems() -> Int {
-        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = try repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed
-        } catch { persistenceError = error.localizedDescription; return 0 }
+    func applyMergedTagsToExistingItems() -> Int? {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return nil }; let changed = try repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
     @discardableResult func updateItem(_ item: CollectionItem, previousState: ItemState) -> Bool {
         do {
@@ -274,9 +275,9 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return false }
     }
-    func deleteAllItems() async -> Int {
+    func deleteAllItems() async -> Int? {
         do {
-            guard let repository, let collectionID = selectedCollection?.id, !isBulkOperationInProgress else { return 0 }
+            guard let repository, let collectionID = selectedCollection?.id, !isBulkOperationInProgress else { return nil }
             isBulkOperationInProgress = true
             defer { isBulkOperationInProgress = false }
             let previousItems = items
@@ -291,7 +292,7 @@ import SwiftData
             if removed > 0 { Task { await syncCollections() } }
             return removed
 
-        } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return 0 }
+        } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return nil }
     }
     @discardableResult func saveWebSync(_ sync: WebSyncRecord) -> Bool {
         do { guard let repository else { return false }; try repository.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true

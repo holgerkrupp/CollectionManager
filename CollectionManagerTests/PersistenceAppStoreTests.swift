@@ -34,6 +34,36 @@ import CloudKit
         XCTAssertEqual(persisted?.name, "Initial")
     }
 
+    func testMaintenanceFailureCannotMasqueradeAsSuccessfulZeroChanges() throws {
+        let container = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        var failFetch = false
+        let store = AppStore()
+        store.configure(context: ModelContext(container), container: container, failureInjector: { if failFetch, case .fetch = $0 { throw CocoaError(.fileReadUnknown) } })
+        XCTAssertTrue(store.addCollection(name: "Maintenance", icon: "books.vertical", subtitle: ""))
+        XCTAssertEqual(store.deduplicateItems(), 0)
+        XCTAssertEqual(store.deleteAllImportedItems(), 0)
+        XCTAssertEqual(store.applyMergedTagsToExistingItems(), 0)
+        failFetch = true
+        XCTAssertNil(store.deduplicateItems())
+        XCTAssertNil(store.deleteAllImportedItems())
+        XCTAssertNil(store.applyTagRules(TagGenerationOptions()))
+        XCTAssertNil(store.applyMergedTagsToExistingItems())
+        XCTAssertNotNil(store.persistenceError)
+    }
+
+    func testFailedBulkSavePreservesItemsAndReportsFailureInsteadOfZero() throws {
+        let container = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        var failSave = false
+        let store = AppStore()
+        store.configure(context: ModelContext(container), container: container, failureInjector: { if failSave, case .save = $0 { throw CocoaError(.fileWriteOutOfSpace) } })
+        XCTAssertTrue(store.addCollection(name: "Bulk", icon: "books.vertical", subtitle: ""))
+        let item = try XCTUnwrap(store.addItem(title: "Preserved", brand: "", variant: "", description: "", state: .wanted, quantity: 1, tags: []))
+        failSave = true
+        XCTAssertNil(store.bulkUpdateState(for: [item], to: .stored))
+        XCTAssertEqual(try XCTUnwrap(store.item(id: item.id)).state, .wanted)
+        XCTAssertNotNil(store.persistenceError)
+    }
+
     func testFailedRatingSaveReturnsFailureWithoutOptimisticRating() throws {
         let container = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         var failSave = false

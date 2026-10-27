@@ -93,7 +93,7 @@ xcodebuild -exportLocalizations -project CollectionManager.xcodeproj -sdk iphone
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The checked-in catalog contains 475 keys, including seven environment-recovery
+The checked-in catalog contains 489 keys, including seven environment-recovery
 strings added after the platform-export union. Entries are retained manually so
 exporting one platform cannot remove the other's strings. Refresh both exports and review their union when UI changes.
 Review catalog diffs; do not ship generated sample strings or claim untranslated
@@ -163,3 +163,5 @@ Production, sandbox and camera were present. This is not App Store distribution
 validation. Inspection exposed missing outbound network permission; the project
 now explicitly enables network client access for product providers and web sync.
 The final archive must be rechecked after all integration commits.
+
+For a historical library without a transport owner marker, verify that the currently signed-in Apple Account is its original account before confirming the recovery prompt. The old schema did not record an authoritative account identity; confirmation is a required manual migration gate. Once bound, account switches fail closed and retain pending work.

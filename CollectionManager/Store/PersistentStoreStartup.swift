@@ -29,7 +29,7 @@ struct StoreStartupFailure: LocalizedError, Sendable {
         case .createDevelopmentLibrary:
             return String(localized: "This development build uses a separate local library and iCloud environment. Your original library stays untouched for the Production build.")
         case .confirmExistingEnvironment:
-            return String(localized: "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure.")
+            return String(localized: "Confirm that this older library belongs to the environment shown below and the Apple Account currently signed into iCloud. Check the account in system settings and export a copy first if you are unsure.")
         case .mismatchedEnvironment:
             return String(localized: "This library is marked for another iCloud environment. Use the matching build; it will not be changed automatically.")
         case .none: break
@@ -186,7 +186,7 @@ struct StoreRecoveryView: View {
                 if failure.requiredChoice == .createDevelopmentLibrary {
                     Button("Create separate development library", action: selectEnvironment).buttonStyle(.borderedProminent)
                 } else if failure.requiredChoice == .confirmExistingEnvironment {
-                    Button("Confirm library environment and open", action: selectEnvironment).buttonStyle(.borderedProminent)
+                    Button("Confirm library environment and account", action: selectEnvironment).buttonStyle(.borderedProminent)
                 }
             }
             HStack {

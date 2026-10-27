@@ -340,14 +340,14 @@ struct ImportReviewView: View {
             }
             .confirmationDialog("Remove duplicate imported items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
                 Button("Deduplicate", role: .destructive) {
-                    let removed = store.deduplicateImportedItems()
+                    guard let removed = store.deduplicateImportedItems() else { maintenanceMessage = nil; return }
                     maintenanceMessage = removed == 0 ? "No duplicates found." : "Removed \(removed) duplicate item\(removed == 1 ? "" : "s")."
                 }
                 Button("Cancel", role: .cancel) {}
             }
             .confirmationDialog("Delete all imported items? This cannot be undone.", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
                 Button("Delete All", role: .destructive) {
-                    let removed = store.deleteAllImportedItems()
+                    guard let removed = store.deleteAllImportedItems() else { maintenanceMessage = nil; return }
                     maintenanceMessage = "Deleted \(removed) imported item\(removed == 1 ? "" : "s")."
                 }
                 Button("Cancel", role: .cancel) {}

@@ -359,11 +359,15 @@ private struct ProductNameSearchResultsView: View {
 struct AddItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
     @State private var title = ""; @State private var brand = ""; @State private var variant = ""; @State private var description = ""; @State private var quantity = 1; @State private var tags = ""; @State private var metadata: [String: MetadataValue] = [:]; @State private var state: ItemState = .wanted; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var sourceSnapshot: ProductSourceSnapshot?; @State private var showingScanner = false; @State private var showingCamera = false; @State private var showingMetadataMapping = false; @State private var pickerItem: PhotosPickerItem?; @State private var manualBarcode = ""; @State private var isLookingUp = false; @State private var lookupMessage: String?; @State private var photoMessage: String?; @State private var productMatches: [CollectionProductMatch] = []; @State private var lookupTask: Task<Void, Never>?; @State private var lookupSuggestions = ProductLookupSuggestions()
+    @State private var saveFailure: String?
     private let scanBarcodeTip = ScanBarcodeTip(); private let siriTip = AddItemsWithSiriTip(); @State private var showsSiriTip = false
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
             Form {
+                if let failure = saveFailure {
+                    Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
                 // Only inserted while eligible, so the form has no empty section otherwise.
                 if showsSiriTip {
                     Section { TipView(siriTip) }
@@ -513,9 +517,19 @@ struct AddItemView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        saveFailure = nil
+                        store.itemActionError = nil
+                        store.persistenceError = nil
                         lookupTask?.cancel()
                         let added = store.addItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines), brand: brand, variant: variant, description: description, state: state, quantity: quantity, tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, metadata: metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }, barcode: barcode, imageData: imageData, sourceSnapshot: sourceSnapshot)
                         if added != nil { AppTips.itemAdded.sendDonation(); dismiss() }
+                        else {
+                            // This editor owns the failure while its draft is open.
+                            // Parent alerts must not replace the presented editor.
+                            saveFailure = store.itemActionError ?? store.persistenceError ?? String(localized: "The item could not be saved.")
+                            store.itemActionError = nil
+                            store.persistenceError = nil
+                        }
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -859,6 +873,7 @@ struct BulkEditItemsView: View {
     @Environment(\.dismiss) private var dismiss
     let items: [CollectionItem]
     @State private var state: ItemState
+    @State private var applyFailed = false
 
     init(items: [CollectionItem]) {
         self.items = items
@@ -874,6 +889,12 @@ struct BulkEditItemsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                if applyFailed {
+                    Section {
+                        Label("The items could not be updated. Your selection is still here; retry Apply after resolving the library error.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("Change") {
                     Picker("Status", selection: $state) {
                         ForEach(store.statuses) { status in
@@ -887,7 +908,8 @@ struct BulkEditItemsView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
-                        store.bulkUpdateState(for: items, to: state)
+                        applyFailed = false
+                        guard store.bulkUpdateState(for: items, to: state) != nil else { applyFailed = true; return }
                         dismiss()
                     }
                     .disabled(items.isEmpty || store.selectedCollection?.role.canEdit != true)

@@ -1625,16 +1625,6 @@
         }
       }
     },
-    "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confirm that this older library belongs to the environment shown below. Export a copy first if you are unsure."
-          }
-        }
-      }
-    },
     "This library is marked for another iCloud environment. Use the matching build; it will not be changed automatically.": {
       "localizations": {
         "en": {
@@ -1665,12 +1655,162 @@
         }
       }
     },
-    "Confirm library environment and open": {
+    "Collection settings could not be saved": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confirm library environment and open"
+            "value": "Collection settings could not be saved"
+          }
+        }
+      }
+    },
+    "Your changes are still in this editor. Check the library error and retry Save.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your changes are still in this editor. Check the library error and retry Save."
+          }
+        }
+      }
+    },
+    "Retry saving background sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry saving background sync"
+          }
+        }
+      }
+    },
+    "Your items were imported, but background sync settings could not be saved. The imported items remain in your library. Retry saving these settings here.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your items were imported, but background sync settings could not be saved. The imported items remain in your library. Retry saving these settings here."
+          }
+        }
+      }
+    },
+    "Your items were imported and background sync settings are saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your items were imported and background sync settings are saved."
+          }
+        }
+      }
+    },
+    "The items could not be updated. Your selection is still here; retry Apply after resolving the library error.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The items could not be updated. Your selection is still here; retry Apply after resolving the library error."
+          }
+        }
+      }
+    },
+    "Retry saving merged tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry saving merged tags"
+          }
+        }
+      }
+    },
+    "Retry applying merged tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry applying merged tags"
+          }
+        }
+      }
+    },
+    "Tags could not be updated. Your options are still here; retry after resolving the library error.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags could not be updated. Your options are still here; retry after resolving the library error."
+          }
+        }
+      }
+    },
+    "No items needed tag changes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No items needed tag changes."
+          }
+        }
+      }
+    },
+    "Merged tag rules could not be saved. Your draft rules are still shown here; retry saving them.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merged tag rules could not be saved. Your draft rules are still shown here; retry saving them."
+          }
+        }
+      }
+    },
+    "Merged tag rules were saved, but existing items could not be updated. Retry applying the saved rules.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merged tag rules were saved, but existing items could not be updated. Retry applying the saved rules."
+          }
+        }
+      }
+    },
+    "Merged tag rules saved. No existing items needed changes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merged tag rules saved. No existing items needed changes."
+          }
+        }
+      }
+    },
+    "Confirm that this older library belongs to the environment shown below and the Apple Account currently signed into iCloud. Check the account in system settings and export a copy first if you are unsure.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that this older library belongs to the environment shown below and the Apple Account currently signed into iCloud. Check the account in system settings and export a copy first if you are unsure."
+          }
+        }
+      }
+    },
+    "Confirm library environment and account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm library environment and account"
+          }
+        }
+      }
+    },
+    "The item could not be saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The item could not be saved."
           }
         }
       }
