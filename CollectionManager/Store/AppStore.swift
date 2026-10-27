@@ -323,10 +323,15 @@ import SwiftData
             await loadSelectedCollectionInBackground()
         } catch {
             syncState = .error
+            sharingSession = cloudService.sharingSession
             legacyReviewCount = cloudService.legacyReviewCount
             syncError = CollectionSharingSession.message(for: error)
             do { pendingSyncCount = try repository.pendingMutations().count }
             catch { persistenceError = error.localizedDescription }
+            // Already committed imports/permission changes remain usable even
+            // when a different zone or legacy review prevents full completion.
+            loadCollections()
+            await loadSelectedCollectionInBackground()
         }
         if syncRequestedWhileSyncing {
             syncRequestedWhileSyncing = false
