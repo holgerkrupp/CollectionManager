@@ -1,63 +1,157 @@
 # CollectionManager 1.0 validation — 27 October 2026
 
-This file records actual evidence and limitations; it is not release approval.
-Xcode 27.1 (27A9275), Swift 6.4, arm64 MacBook Pro M4 Pro/24 GiB, macOS 27.2.
+This records actual evidence, not release approval. Toolchain: Xcode 27.1
+(27A9275), Swift 6.4; M4 Pro / 24 GiB host, macOS 27.2. App language mode remains
+Swift 5 with its documented actor isolation; the package builds in Swift 6 mode.
 
-## Baseline
+## Baseline and source
 
-Fresh remote clones at CollectionManager `5bf59645f4fe851b8516ecc0af5e57b122b7e771`
-and kit `860b0f3d5950a9129056c2056a00e21cb08827b0`: unsigned macOS/iOS Release
-builds passed, original three macOS tests passed, kit warnings-as-errors passed.
-MealPlan remote reference `c1285b95dc29d83479045e0bdd02421e474e000b` was read
-from a separate clone. Its local pre-existing project/catalog edits were untouched.
+Fresh remote clones at app `5bf59645f4fe851b8516ecc0af5e57b122b7e771` and kit
+`860b0f3d5950a9129056c2056a00e21cb08827b0` passed unsigned macOS/iOS Release,
+the original three macOS tests, and kit tests with warnings as errors. The
+MealPlan reference was read at `c1285b95dc29d83479045e0bdd02421e474e000b`;
+its two existing local changes were preserved without modification.
 
-## Implemented and verified locally
+Final source: **37ca6f8e613b47dba334bec0eb82d699055f7354**. The final checkout was cloned from remote main,
+with a new build directory and the checked-in remote package resolution; no
+sibling package override or production library was used.
 
-- Foundation `9956a5a`: 34 focused tests passed (measurement method excluded).
-- Latest integrated macOS suite: 81 tests passed, zero failures, including full
-  1k/10k/50k host measurements, typed failures/atomic writes, real POSIX unreadable
-  store preservation, audited V1→V2 fixture/export opening, edit sessions,
-  provider errors, settings/defaults, multi-zone/scope/account isolation,
-  restart handoff, pending-delete/generation/conflict/asset tests and queries.
-- Kit `239da36` fixes durable apply/state failure progress. `5e9a09d` additionally
-  coalesces concurrent startup/shutdown; 20 tests passed with warnings as errors.
-  Core Data source/API behavior was preserved.
-- Intermediate integrated unsigned iOS Release build passed. Development-signed
-  Production archives built for iOS and macOS; embedded entitlements contained
-  the intended container and Production environment. This is not App Store
-  distribution/export validation. Final archive rechecks follow integration.
-- iPhone Duo iOS27.1 simulator: 77 unit tests passed in the earlier integrated
-  run and both UI smoke tests passed. Mac UI execution was blocked by Developer
-  Tools authorization; the target compiles. No Mac UI runtime pass is claimed.
+Kit main `1bdf33bb4b2d82e4c1782ba905ace0d132f545a4` is pinned in the project
+and Package.resolved. Its 21 tests passed with warnings as errors. Changes cover
+durable apply/progress failure, concurrent engine startup/shutdown, and an
+opt-in throwing SwiftData codec while retaining existing APIs/Core Data.
 
-Final clean-clone evidence is appended after the tested integration is committed.
+## Final verification
 
-## Measured host performance
+| Fresh-clone check | Actual result |
+| --- | --- |
+| macOS unit suite | 150 passed, zero failures |
+| iPhone Simulator iOS 27.1 | 150 unit + 6 UI passed; 1 iPad-only test skipped |
+| Native iPad Simulator iOS 27.0 | All 7 UI tests passed, including rotation/representation draft ownership |
+| Unsigned macOS/iOS Release | Both passed |
+| Development-signed Production archive, macOS/iOS | Both passed; deep/strict signature checks passed |
+| Embedded entitlements | Intended container; Production in both archives; Development in signed Debug; macOS outbound network enabled |
+| Localized camera usage copy | Present in the built English InfoPlist.strings on both platforms |
+| Kit | 21 passed with warnings as errors |
 
-See PERFORMANCE.md for exact samples and scope. In matching unoptimized Debug
-runs, 50k synthetic SQLite seed time fell from 151,425 ms to 4,398 ms after
-rejecting impossible date-tag shapes before allocating formatters. 10k fell
-from 30,789 ms to 818 ms. Optimized test-build indexed search was about 95 ms at
-50k, versus 107 ms assembling text per query. Search/filter/sort now execute on
-background tasks with cancellation/generation checks. Image-heavy host snapshots at 50k JPEG-backed records measured about 1161 MiB
-resident and 620 MiB physical footprint after fetch; 128 thumbnails used 18 MiB decoded
-pixels. These are sampled values, not peak bounds. UI frames, physical-device
-latency/memory and network-scale counts remain unmeasured.
+All app verification used Swift warnings as errors with suppression disabled.
+Apple's metadata tool emitted its informational no-AppIntents-dependency warning
+for test targets; no Swift compiler warnings were suppressed. The UI suites
+exercise onboarding, CRUD, search/filter/sort, settings validation, credential
+Settings, the real CSV parser/review/import, offline sharing recovery and largest
+accessibility text/forced RTL. No native real-account sharing result is implied.
 
-## Required external evidence
+[Machine-readable results](VALIDATION-RESULTS.json) are extracted from final
+xcresult summaries. Local full logs/results/archives are under
+`/tmp/cm-validation/release-*`; no machine-specific signing profile or personal
+account information is checked in.
 
-1. Revoke/rotate the previously public Games EAN credential at the provider;
-   verify the old value no longer authorizes requests, without posting the value.
-2. Supply an authorized Xcode 27.1 CI host (the hosted macos-26 image currently
-   lists only 26.x); run the actual workflow. No self-hosted runner was registered.
-3. Enable Developer Tools access for the execution app or run UI tests from an
-   authorized Xcode/test host. Repeat all smoke, resize, large-text, VoiceOver,
-   keyboard, contrast, long-string and RTL tests on iPhone/iPad/Mac.
-4. Deploy/review Production CloudKit schema and execute the signed owner/editor/
-   viewer matrix with real independent Apple Accounts, existing/new shares,
-   offline edits, revoke/leave/stop, reinstall and interrupted handoff. Review
-   ambiguous legacy candidates explicitly; no automatic resurrection is allowed.
-5. Verify provider retention, privacy policy and App Store disclosures, then
-   validate distribution-signed archives and supported physical devices.
+Earlier source `1ac6b5a` independently passed a fresh-clone 104-test macOS suite,
+104 iPhone unit tests, five iPhone UI flows (one iPad-only skip), six native iPad
+UI flows, unsigned Release builds and development-signed Production archives
+for macOS/iOS. Final results above supersede those counts.
 
-Issues #10, #16 and #17 remain open until their actual release gates pass.
+The expanded suite covers the audited original V1 SQLite fixture → immutable
+V2 migration, export/reopen including real WAL/SHM, unreadable/corrupt startup,
+fetch/save failures and rollback, settings/defaults/permissions/import provenance,
+edit ownership, provider errors, account/environment/multi-zone routing,
+child-only remote deltas, conflict/deletion generations, restart handoff,
+assets, local query/cache preparation and cancellation, and locale formatting.
+Tests operate on isolated temporary stores/preferences, never the user's library.
+
+A deterministic interleaved-context test initially failed: an older staged source
+import overwrote a later manual edit under the real SDK. The repair adds a shared
+per-store, per-collection optimistic revision fence to repository and codec
+commits. Stale or busy commits fail atomically and retain the newer data and
+journal. The gate never waits for a long background flush on the UI thread.
+It is an in-process writer contract; it does not assert coordination between
+separate app processes or permit an older binary to open an upgraded store.
+
+## Environment limits
+
+The actual hosted CI run [40556559465](https://github.com/holgerkrupp/CollectionManager/actions/runs/40556559465)
+failed selecting required Xcode 27.1 before compilation: the hosted macos-26
+image listed only Xcode 26.x. The workflow explicitly selects 27.1 and supports a
+custom runner label through workflow_dispatch; no compatible self-hosted runner
+was registered. A green remote workflow is still required.
+
+The fresh macOS UI target builds. A fresh runtime probe was stopped after TCC
+reported `kTCCServiceDeveloperTool` denied for `com.openai.codex`, without allowing
+a prompt (`release-ui-authorization.log`). Developer mode was disabled. No macOS
+UI runtime pass is claimed; these settings were not changed. Connected physical
+iPhone/iPad devices reported unavailable. Simulator flows do not establish
+physical-device VoiceOver, performance or native multi-account sharing acceptance.
+
+Development-signed archive entitlement inspection is evidence of configured
+container/environment, not distribution approval. In particular the development
+iOS archive retains get-task-allow. No distribution-signed export or App Store
+validation was performed.
+
+## Measured performance
+
+See [PERFORMANCE.md](../PERFORMANCE.md) for conditions and limitations. Matching
+Debug samples reduced 50k seed from 151,425 to 4,398 ms and 10k from 30,789 to
+818 ms. A later locale-aware 50k sample measured index preparation 83.44 ms,
+indexed search 91.94 ms, uncached search 161.75 ms and fetch/decode 1735.72 ms.
+These phases and table header sorting now run on cancellable workers.
+
+The full parser/mapping/repository/event/outbox import path measured 333.05 ms
+at 1k, 3.585 s at 10k and 19.883 s at 50k after removing repeated validation
+fetches (before: 368.26 ms / 4.040 s / 22.807 s). A later complete run including the write fence measured
+308.16 ms / 3.524 s / 20.545 s; these samples show host variance.
+The app performs preparation
+and saving away from its UI executor, with explicit progress/failure retention.
+
+Real JPEG host snapshots at 50k measured roughly 1161 MiB resident / 620 MiB
+footprint after fetch; 128 thumbnails used 18 MiB decoded pixels. These are
+samples, not peaks. The selected collection still materializes original
+compressed image blobs. Device frames/peak memory/full-resolution images and
+real incremental network counts remain acceptance gates.
+
+## Precise remaining actions
+
+1. Revoke/rotate the historical Games EAN credential at the provider and prove
+   the old value no longer authorizes requests. Do not publish the value.
+2. Run the complete workflow on an authorized Xcode 27.1 runner, including
+   migration fixtures and macOS UI. Authorize Developer Tools or run from Xcode.
+3. Before opening an unmarked historical library, confirm its original Apple
+   Account and environment in recovery. Debug offers a separate Development
+   library; it must not silently adopt the original Production store.
+4. Deploy/review the Production schema and execute CloudKit-RELEASE.md using
+   signed owner/editor/viewer accounts: existing/new native invitations, roles,
+   revoke/leave/stop, offline conflicts/deletes, reinstall/account changes,
+   interrupted legacy handoff and old/new-client parity. Review ambiguous
+   legacy snapshots explicitly. Record real 1k/10k/50k transfer counts.
+5. On supported physical iPhone/iPad/Mac, measure launch/open/search/filter/sort,
+   scroll/import frames and full-resolution image memory/peak; complete
+   VoiceOver, largest text, keyboard, contrast and long-string/RTL workflows.
+   The simulator includes a largest-text/forced-RTL smoke, not this full matrix.
+6. Verify provider retention and privacy policy/App Store answers, then validate
+   distribution-signed exports and supported-device archives. English is the
+   sole 1.0 language; no additional translation is claimed.
+
+#2 is closed. Implementation issues #3/#4/#8/#15 can close with the local
+acceptance evidence; #5 remains open for its actual CI migration requirement.
+#6/#7/#9–#14/#16/#17 retain only their documented external/device/CI/release
+acceptance work. **#10, #16 and #17 remain open.**
+
+## Pushed implementation commits
+
+All changes landed directly on main; no branches, PRs or worktrees were created.
+
+| Repository | Commit | Change |
+| --- | --- | --- |
+| CollectionManager | `9956a5a` | Persistence, credential and edit-session foundation |
+| CollectionManager | `82deb37` | V2 transport, native sharing, measured performance and release resources |
+| CollectionManager | `8f316e9` | Preserve visible committed results during recoverable sync failure |
+| CollectionManager | `daeae5f` | Stored permissions and failed ratings |
+| CollectionManager | `42b891b` | CSV malformed quotes and mapped tags |
+| CollectionManager | `16be870` | Environment/account isolation and canonical shared routing |
+| CollectionManager | `1ac6b5a` | Failure-retaining editors and release UI flows |
+| CollectionManager | `37ca6f8` | Responsive atomic imports, concurrent-write fences, locale formatting and final regression coverage |
+| CloudKitCollaborationKit | `239da36` | Durable apply/state progress barrier |
+| CloudKitCollaborationKit | `5e9a09d` | Concurrent pool lifecycle ownership |
+| CloudKitCollaborationKit | `1bdf33b` | Compatible opt-in durable SwiftData dispatch |
+
+The following evidence-only commit updates this document and issue dispositions;
+application/package source is unchanged from the tested revisions above.

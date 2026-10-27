@@ -1,0 +1,80 @@
+{
+  "sourceCommit": "37ca6f8e613b47dba334bec0eb82d699055f7354",
+  "kitRevision": "1bdf33bb4b2d82e4c1782ba905ace0d132f545a4",
+  "date": "2026-10-27",
+  "toolchain": "Xcode 27.1 (27A9275), Swift 6.4",
+  "freshRemoteClone": true,
+  "swiftWarningsAsErrors": true,
+  "appTests": {
+    "macOS": {
+      "result": "Passed",
+      "totalTestCount": 150,
+      "passedTests": 150,
+      "failedTests": 0,
+      "skippedTests": 0
+    },
+    "iPhoneSimulator": {
+      "result": "Passed",
+      "totalTestCount": 157,
+      "passedTests": 156,
+      "failedTests": 0,
+      "skippedTests": 1
+    },
+    "iPadSimulator": {
+      "result": "Passed",
+      "totalTestCount": 7,
+      "passedTests": 7,
+      "failedTests": 0,
+      "skippedTests": 0
+    }
+  },
+  "kitTests": {
+    "passedTests": 21,
+    "failedTests": 0,
+    "swiftWarningsAsErrors": true
+  },
+  "unsignedReleaseBuilds": {
+    "macOS": "passed",
+    "iOS": "passed"
+  },
+  "developmentSignedProductionArchives": {
+    "macOS": "passed",
+    "iOS": "passed",
+    "deepStrictSignatureVerification": "passed"
+  },
+  "inspectedEntitlements": {
+    "macProduction": {
+      "com.apple.developer.icloud-container-environment": "Production",
+      "com.apple.developer.icloud-container-identifiers": [
+        "iCloud.de.holgerkrupp.CollectionManager"
+      ],
+      "com.apple.security.network.client": true
+    },
+    "macDevelopment": {
+      "com.apple.developer.icloud-container-environment": "Development",
+      "com.apple.developer.icloud-container-identifiers": [
+        "iCloud.de.holgerkrupp.CollectionManager"
+      ],
+      "com.apple.security.get-task-allow": true,
+      "com.apple.security.network.client": true
+    },
+    "iosProduction": {
+      "com.apple.developer.icloud-container-environment": "Production",
+      "com.apple.developer.icloud-container-identifiers": [
+        "iCloud.de.holgerkrupp.CollectionManager"
+      ],
+      "get-task-allow": true
+    }
+  },
+  "localizedCameraUsageStrings": {
+    "macOS": true,
+    "iOS": true
+  },
+  "macOSUI": "Blocked: TCC denied DeveloperTool for com.openai.codex without prompting; probe stopped",
+  "hostedCI": "Blocked before compilation: required Xcode 27.1 unavailable on macos-26",
+  "hostedCIRun": "https://github.com/holgerkrupp/CollectionManager/actions/runs/40556559465",
+  "physicalDeviceAcceptance": "Not performed: three paired iOS devices unavailable",
+  "distributionExportValidation": "Not performed",
+  "productionCloudKitAndRealAccountMatrix": "Not performed",
+  "providerCredentialRevocation": "Not performed"
+}

@@ -42,6 +42,16 @@ journaled; viewer-blocked intent is retained without starving writable collectio
 Native/foreground/push/local-save work coalesces; retries are bounded and respect
 CloudKit retry-after. Background work uses the same main-app transport owner.
 
+Independent repository and codec contexts share a per-store, per-collection
+optimistic write fence. Operations capture revisions before reading; a stale or
+busy commit fails and rolls back domain changes and new intent together. The
+short revision lock is separate from the disk-save gate, so taking a revision
+snapshot does not wait for a large background import. Metadata-only transport
+saves do not invalidate domain reads. This coordinates the current process,
+not separate running binaries; do not open an upgraded store in an old app.
+Import-created metadata fields and web-source configuration changes are included
+in their item/configuration transaction, rather than saved beforehand.
+
 Remote records/deletes commit before engine serialization can advance. Remote
 commits do not create local outbox echoes. A failed local apply/state save stops
 that engine instance; restart uses unchanged durable state and replays its journal.
