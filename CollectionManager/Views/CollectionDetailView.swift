@@ -72,6 +72,11 @@ struct CollectionDetailView: View {
             } message: {
                 Text(store.itemActionError ?? "")
             }
+            .alert("Library save failed", isPresented: Binding(get: { store.persistenceError != nil }, set: { if !$0 { store.persistenceError = nil } })) {
+                Button("OK") { store.persistenceError = nil }
+            } message: {
+                Text(store.persistenceError ?? "The local library could not save this change.")
+            }
             .alert("iCloud sync error", isPresented: $showingSyncError) {
                 Button("Retry") { Task { await store.syncCollections() } }
                 Button("OK", role: .cancel) {}

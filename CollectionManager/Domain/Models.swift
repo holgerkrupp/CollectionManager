@@ -228,7 +228,7 @@ struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sendable {
 }
 
 struct CollectionModel: Identifiable, Hashable, Sendable {
-    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var role: CollectionMemberRole = .owner; var sharedWith: [String] = []
+    let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var defaultStatusID: String = ItemState.wanted.rawValue; var barcodeRequired: Bool = false; var role: CollectionMemberRole = .owner; var sharedWith: [String] = []
 
     func status(for state: ItemState) -> CollectionStatus {
         statuses.first(where: { $0.id == state.rawValue }) ?? CollectionStatus.fallback(for: state)
@@ -268,14 +268,18 @@ struct CollectionSettingsPayload: Codable, Sendable {
     var statuses: [CollectionStatus] = CollectionStatus.defaults
     var mergedTags: [MergedTagRule] = []
     var metadataFields: [MetadataFieldDefinition] = []
+    var defaultStatusID: String?
+    var barcodeRequired = false
 
-    private enum CodingKeys: String, CodingKey { case category, statuses, statusLabels, mergedTags, metadataFields }
+    private enum CodingKeys: String, CodingKey { case category, statuses, statusLabels, mergedTags, metadataFields, defaultStatusID, barcodeRequired }
 
-    init(category: CollectionCategory = .custom, statuses: [CollectionStatus] = CollectionStatus.defaults, mergedTags: [MergedTagRule] = [], metadataFields: [MetadataFieldDefinition] = []) {
+    init(category: CollectionCategory = .custom, statuses: [CollectionStatus] = CollectionStatus.defaults, mergedTags: [MergedTagRule] = [], metadataFields: [MetadataFieldDefinition] = [], defaultStatusID: String? = nil, barcodeRequired: Bool = false) {
         self.category = category
         self.statuses = statuses
         self.mergedTags = mergedTags
         self.metadataFields = metadataFields
+        self.defaultStatusID = defaultStatusID ?? statuses.first?.id
+        self.barcodeRequired = barcodeRequired
     }
 
     init(from decoder: Decoder) throws {
@@ -294,6 +298,11 @@ struct CollectionSettingsPayload: Codable, Sendable {
         }
         self.mergedTags = try container.decodeIfPresent([MergedTagRule].self, forKey: .mergedTags) ?? []
         self.metadataFields = try container.decodeIfPresent([MetadataFieldDefinition].self, forKey: .metadataFields) ?? []
+        self.defaultStatusID = try container.decodeIfPresent(String.self, forKey: .defaultStatusID)
+        self.barcodeRequired = try container.decodeIfPresent(Bool.self, forKey: .barcodeRequired) ?? false
+        if defaultStatusID == nil || !statuses.contains(where: { $0.id == defaultStatusID }) {
+            defaultStatusID = statuses.first?.id
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -302,6 +311,8 @@ struct CollectionSettingsPayload: Codable, Sendable {
         try container.encode(statuses, forKey: .statuses)
         try container.encode(mergedTags, forKey: .mergedTags)
         try container.encode(metadataFields, forKey: .metadataFields)
+        try container.encode(defaultStatusID ?? statuses.first?.id, forKey: .defaultStatusID)
+        try container.encode(barcodeRequired, forKey: .barcodeRequired)
     }
 }
 

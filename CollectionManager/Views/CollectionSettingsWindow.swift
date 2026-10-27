@@ -1,6 +1,5 @@
 #if os(macOS)
 import SwiftUI
-import SFSymbolSelector
 
 /// Identifier of the resizable collection-settings window scene. The window is
 /// opened per collection, so several collections can be configured at once.
@@ -99,7 +98,8 @@ private struct CollectionSettingsSplitView: View {
         _metadataFields = State(initialValue: collection.metadataFields)
         _selectedStatusID = State(initialValue: configured.first?.id)
         _selectedFieldID = State(initialValue: collection.metadataFields.first?.id)
-        _defaultState = State(initialValue: configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
+        _defaultState = State(initialValue: configured.first(where: { $0.id == collection.defaultStatusID }).map { ItemState(rawValue: $0.id) } ?? configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
+        _barcodeRequired = State(initialValue: collection.barcodeRequired)
         _notifySharedItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemAdded, collectionID: collection.id))
         _notifySharedItemRemoved = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemRemoved, collectionID: collection.id))
         _notifyAutomaticSyncItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.automaticSyncItemAdded, collectionID: collection.id))
@@ -115,6 +115,8 @@ private struct CollectionSettingsSplitView: View {
             || category != collection.category
             || statuses != savedStatuses
             || metadataFields != collection.metadataFields
+            || defaultState.rawValue != collection.defaultStatusID
+            || barcodeRequired != collection.barcodeRequired
     }
 
     var body: some View {
@@ -166,7 +168,7 @@ private struct CollectionSettingsSplitView: View {
             Section {
                 TextField("SF Symbol", text: $icon)
                     .textFieldStyle(.roundedBorder)
-                SFSymbolSelector(selection: $icon, suggestedSymbolName: icon)
+                CollectionSymbolPicker(selection: $icon, suggestedSymbolName: icon)
             } header: {
                 Text("Icon")
             }
@@ -426,6 +428,8 @@ private struct CollectionSettingsSplitView: View {
         updated.category = category
         updated.statuses = cleanedStatuses
         updated.metadataFields = cleanedFields
+        updated.defaultStatusID = cleanedStatuses.contains(where: { $0.id == defaultState.rawValue }) ? defaultState.rawValue : (cleanedStatuses.first?.id ?? ItemState.wanted.rawValue)
+        updated.barcodeRequired = barcodeRequired
         store.updateCollection(updated)
         // Adopt the normalized values so the editor reflects what was stored
         // and the Save button settles back to its disabled, saved state.
@@ -433,6 +437,7 @@ private struct CollectionSettingsSplitView: View {
         icon = cleanedIcon
         statuses = cleanedStatuses
         metadataFields = cleanedFields
+        defaultState = ItemState(rawValue: updated.defaultStatusID)
     }
 
     private static func cleaned(_ statuses: [CollectionStatus]) -> [CollectionStatus] {
@@ -475,7 +480,7 @@ private struct StatusEditorForm: View {
                 }
                 TextField("SF Symbol", text: $status.symbol)
                     .textFieldStyle(.roundedBorder)
-                SFSymbolSelector(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
+                CollectionSymbolPicker(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
             } header: {
                 Text("Status")
             }

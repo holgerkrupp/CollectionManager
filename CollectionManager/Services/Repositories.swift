@@ -1,5 +1,24 @@
 import Foundation
+import OSLog
 import SwiftData
+
+enum RepositoryError: LocalizedError, Sendable {
+    case fetchFailed
+    case saveFailed
+    case permissionDenied
+    case validation(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .fetchFailed: "The local collection store could not be read."
+        case .saveFailed: "The local collection store could not save this change."
+        case .permissionDenied: "You do not have permission to change this collection."
+        case .validation(let message): message
+        }
+    }
+}
+
+private let repositoryLogger = Logger(subsystem: "de.holgerkrupp.CollectionManager", category: "persistence")
 
 struct LocalSyncPayload: Sendable {
     let items: [CollectionItem]
@@ -61,7 +80,14 @@ actor CollectionBackgroundRepository {
         }
         context.delete(item)
         enqueue(context: context, collectionID: collectionID, itemID: itemID, recordName: itemID.uuidString, recordType: "CollectionItem", operation: "delete")
-        return (try? context.save()) != nil
+        do {
+            try context.save()
+            return true
+        } catch {
+            context.rollback()
+            repositoryLogger.error("Background delete failed; transaction rolled back: \(String(describing: type(of: error)), privacy: .public)")
+            return false
+        }
     }
 
     func deleteAllItems(in collectionID: UUID) -> Int {
@@ -88,7 +114,14 @@ actor CollectionBackgroundRepository {
             enqueue(context: context, collectionID: collectionID, itemID: comment.itemID, recordName: comment.id.uuidString, recordType: "CollectionItemComment", operation: "delete")
         }
         guard !items.isEmpty || !events.isEmpty || !ratings.isEmpty || !comments.isEmpty else { return 0 }
-        return (try? context.save()) != nil ? items.count : 0
+        do {
+            try context.save()
+            return items.count
+        } catch {
+            context.rollback()
+            repositoryLogger.error("Background bulk delete failed; transaction rolled back: \(String(describing: type(of: error)), privacy: .public)")
+            return 0
+        }
     }
 
     func deleteCollection(id collectionID: UUID) -> Bool {
@@ -107,7 +140,14 @@ actor CollectionBackgroundRepository {
         items.forEach(context.delete); ratings.forEach(context.delete); comments.forEach(context.delete); events.forEach(context.delete); webSyncs.forEach(context.delete); members.forEach(context.delete); mutations.forEach(context.delete); syncStates.forEach(context.delete)
         context.delete(collection)
         enqueue(context: context, collectionID: id, itemID: nil, recordName: id.uuidString, recordType: "Collection", operation: "delete")
-        return (try? context.save()) != nil
+        do {
+            try context.save()
+            return true
+        } catch {
+            context.rollback()
+            repositoryLogger.error("Background collection delete failed; transaction rolled back: \(String(describing: type(of: error)), privacy: .public)")
+            return false
+        }
     }
 
     private func canEdit(_ collectionID: UUID, context: ModelContext) -> Bool {
@@ -123,6 +163,7 @@ actor CollectionBackgroundRepository {
 
 @MainActor final class CollectionRepository {
     private let context: ModelContext
+    private(set) var lastPersistenceError: RepositoryError?
     init(context: ModelContext) { self.context = context }
     func collections() -> [CollectionModel] {
         let records = (try? context.fetch(FetchDescriptor<CollectionRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))) ?? []
@@ -149,7 +190,9 @@ actor CollectionBackgroundRepository {
                 return updated
             })
         }
-        return CollectionModel(id: record.id, name: record.name, icon: record.icon, subtitle: record.subtitle, category: payload.category, statuses: payload.statuses, mergedTags: payload.mergedTags, metadataFields: payload.metadataFields, role: role)
+        let statuses = payload.statuses.isEmpty ? CollectionStatus.defaults : payload.statuses
+        let defaultStatusID = statuses.contains(where: { $0.id == payload.defaultStatusID }) ? (payload.defaultStatusID ?? statuses[0].id) : statuses[0].id
+        return CollectionModel(id: record.id, name: record.name, icon: record.icon, subtitle: record.subtitle, category: payload.category, statuses: statuses, mergedTags: payload.mergedTags, metadataFields: payload.metadataFields, defaultStatusID: defaultStatusID, barcodeRequired: payload.barcodeRequired, role: role)
     }
     private func mergedTags(for collectionID: UUID) -> [MergedTagRule] {
         let id = collectionID
@@ -212,7 +255,8 @@ actor CollectionBackgroundRepository {
         guard let record = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first else { return }
         record.name = collection.name; record.icon = collection.icon; record.subtitle = collection.subtitle; record.updatedAt = .now
         let statuses = collection.statuses.isEmpty ? CollectionStatus.defaults : collection.statuses
-        let payload = CollectionSettingsPayload(category: collection.category, statuses: statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields)
+        let defaultStatusID = statuses.contains(where: { $0.id == collection.defaultStatusID }) ? collection.defaultStatusID : statuses[0].id
+        let payload = CollectionSettingsPayload(category: collection.category, statuses: statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields, defaultStatusID: defaultStatusID, barcodeRequired: collection.barcodeRequired)
         record.settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}"
 
         // Items keep the status ID, so removing a status must not leave items
@@ -241,8 +285,7 @@ actor CollectionBackgroundRepository {
         context.insert(ItemRecord(from: item))
         context.insert(EventRecord(itemID: item.id, collectionID: item.collectionID, type: "created"))
         enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
-        save()
-        return true
+        return save()
     }
     func webSyncs(for collectionID: UUID) -> [WebSyncRecord] { (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.urlString)]))) ?? [] }
     func collectionName(for collectionID: UUID) -> String {
@@ -571,7 +614,7 @@ actor CollectionBackgroundRepository {
             let isShadowedPrivateSnapshot = snapshot.collection.role == .owner && sharedSnapshotsByCollection[collectionID] != nil
             let existingCollection = try? context.fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first
             let canReportSharedItemChanges = existingCollection != nil
-            let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields)
+            let payload = CollectionSettingsPayload(category: snapshot.collection.category, statuses: snapshot.collection.statuses, mergedTags: snapshot.collection.mergedTags, metadataFields: snapshot.collection.metadataFields, defaultStatusID: snapshot.collection.defaultStatusID, barcodeRequired: snapshot.collection.barcodeRequired)
             let settingsJSON = (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}"
             if let existingCollection, !isShadowedPrivateSnapshot {
                 if existingCollection.name != snapshot.collection.name ||
@@ -698,5 +741,19 @@ actor CollectionBackgroundRepository {
     private func hasCollectionMembership(_ collectionID: UUID) -> Bool { let id = collectionID; return ((try? context.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id }))) ?? []).isEmpty == false }
     private func importSourceIdentity(_ sourceKey: String) -> String { sourceKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
     private func importIdentity(title: String, brand: String, variant: String) -> String { [title, brand, variant].map(importSourceIdentity).joined(separator: "\u{1f}") }
-    private func save() { try? context.save() }
+    @discardableResult
+    private func save() -> Bool {
+        do {
+            try context.save()
+            lastPersistenceError = nil
+            return true
+        } catch {
+            // Roll back the failed transaction so callers never observe a
+            // success-looking in-memory mutation after persistence failed.
+            context.rollback()
+            lastPersistenceError = .saveFailed
+            repositoryLogger.error("SwiftData save failed; transaction rolled back: \(String(describing: type(of: error)), privacy: .public)")
+            return false
+        }
+    }
 }

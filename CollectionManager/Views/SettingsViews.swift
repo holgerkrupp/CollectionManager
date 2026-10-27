@@ -1,5 +1,4 @@
 import SwiftUI
-import SFSymbolSelector
 
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
@@ -17,7 +16,7 @@ struct SettingsView: View {
             Form {
                 Section("Defaults") {
                     TextField("Default collection icon", text: $defaultIcon)
-                    SFSymbolSelector(selection: $defaultIcon, suggestedSymbolName: defaultIcon)
+                    CollectionSymbolPicker(selection: $defaultIcon, suggestedSymbolName: defaultIcon)
                     Toggle("Confirm before deleting", isOn: $confirmDeletes)
                 }
 
@@ -34,6 +33,17 @@ struct SettingsView: View {
                     Text("Cloud sharing uses your private CloudKit database and shared database.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("About") {
+                    LabeledContent("Version", value: Bundle.main.shortVersion)
+                    LabeledContent("Build", value: Bundle.main.buildNumber)
+                    Link(destination: URL(string: "https://github.com/holgerkrupp/CollectionManager/issues/new")!) {
+                        Label("Support and troubleshooting", systemImage: "questionmark.circle")
+                    }
+                    Link(destination: URL(string: "https://github.com/holgerkrupp/CollectionManager/blob/main/README.md#privacy-and-security")!) {
+                        Label("Privacy information", systemImage: "hand.raised")
+                    }
                 }
 
                 Section("Help") {
@@ -96,6 +106,11 @@ struct SettingsView: View {
     }
 }
 
+private extension Bundle {
+    var shortVersion: String { object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
+    var buildNumber: String { object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1" }
+}
+
 struct CollectionSettingsView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let collection: CollectionModel
     @State private var statuses: [CollectionStatus]
@@ -112,7 +127,8 @@ struct CollectionSettingsView: View {
         let configured = collection.statuses.isEmpty ? CollectionStatus.defaults : collection.statuses
         _statuses = State(initialValue: configured)
         _metadataFields = State(initialValue: collection.metadataFields)
-        _defaultState = State(initialValue: configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
+        _defaultState = State(initialValue: configured.first(where: { $0.id == collection.defaultStatusID }).map { ItemState(rawValue: $0.id) } ?? configured.first.map { ItemState(rawValue: $0.id) } ?? .wanted)
+        _barcodeRequired = State(initialValue: collection.barcodeRequired)
         _notifySharedItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemAdded, collectionID: collection.id))
         _notifySharedItemRemoved = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.sharedItemRemoved, collectionID: collection.id))
         _notifyAutomaticSyncItemAdded = AppStorage(wrappedValue: false, LocalNotificationPreferences.key(.automaticSyncItemAdded, collectionID: collection.id))
@@ -205,6 +221,7 @@ struct CollectionSettingsView: View {
                 }
             }
             .navigationTitle("Collection settings")
+            .disabled(!collection.role.canEdit)
             .toolbar {
                 #if os(iOS)
                 ToolbarItem(placement: .platformLeading) {
@@ -227,6 +244,8 @@ struct CollectionSettingsView: View {
             if cleaned[index].symbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { cleaned[index].symbol = "circle" }
         }
         updated.statuses = cleaned
+        updated.defaultStatusID = cleaned.contains(where: { $0.id == defaultState.rawValue }) ? defaultState.rawValue : (cleaned.first?.id ?? ItemState.wanted.rawValue)
+        updated.barcodeRequired = barcodeRequired
         updated.metadataFields = metadataFields.enumerated().map { index, field in
             var field = field
             field.name = field.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -280,7 +299,7 @@ struct StatusEditorView: View {
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     #endif
-                SFSymbolSelector(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
+                CollectionSymbolPicker(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
             }
             Section("Preview") {
                 Label(status.name.isEmpty ? "Status" : status.name, systemImage: status.symbol.isEmpty ? "circle" : status.symbol)
@@ -298,7 +317,7 @@ struct EditCollectionView: View {
     #endif
     @State private var name: String; @State private var subtitle: String; @State private var icon: String; @State private var category: CollectionCategory
     init(collection: CollectionModel) { original = collection; _name = State(initialValue: collection.name); _subtitle = State(initialValue: collection.subtitle); _icon = State(initialValue: collection.icon); _category = State(initialValue: collection.category) }
-    var body: some View { NavigationStack { Form { TextField("Name", text: $name); categoryPicker; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); customizeStatusesAndMetadata } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
+    var body: some View { NavigationStack { Form { TextField("Name", text: $name); categoryPicker; TextField("Sharing label", text: $subtitle); TextField("SF Symbol", text: $icon); CollectionSymbolPicker(selection: $icon, suggestedSymbolName: icon); Section { Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary); customizeStatusesAndMetadata } }.navigationTitle("Edit collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { var collection = store.selectedCollection?.id == original.id ? store.selectedCollection! : original; collection.name = name; collection.subtitle = subtitle; collection.icon = icon; collection.category = category; store.updateCollection(collection); dismiss() } } } } }
 
     /// macOS opens the resizable settings window instead of pushing a form into
     /// this sheet. The sheet is deliberately left open so pending name or icon
@@ -323,7 +342,7 @@ struct EditCollectionView: View {
 struct NewCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
     @State private var name = ""; @State private var subtitle = "Private"; @State private var icon = "square.stack.3d.up.fill"; @State private var category: CollectionCategory = .custom
-    var body: some View { NavigationStack { Form { TextField("Collection name", text: $name); categoryPicker; TextField("Sharing", text: $subtitle); TextField("SF Symbol", text: $icon); SFSymbolSelector(selection: $icon, suggestedSymbolName: icon); Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary) }.navigationTitle("New collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { store.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); dismiss() }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty) } } } }
+    var body: some View { NavigationStack { Form { TextField("Collection name", text: $name); categoryPicker; TextField("Sharing", text: $subtitle); TextField("SF Symbol", text: $icon); CollectionSymbolPicker(selection: $icon, suggestedSymbolName: icon); Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary) }.navigationTitle("New collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { store.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); dismiss() }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty) } } } }
     @ViewBuilder private var categoryPicker: some View {
         Picker("Category", selection: $category) {
             ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in

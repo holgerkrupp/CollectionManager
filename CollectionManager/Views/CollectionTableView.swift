@@ -34,7 +34,9 @@ struct CollectionTableView: View {
         .onChange(of: store.itemSort) { _, _ in usesColumnSort = false }
         // Leaving the table keeps the edits: they are the user's own typing and
         // discarding them silently would be the surprising behaviour.
-        .onDisappear { commitAll() }
+        // Drafts intentionally remain owned by this edit session. Adaptive
+        // layout changes must not commit or discard user input as a side effect
+        // of a child view disappearing.
     }
 
     private var rows: [CollectionItem] {
@@ -347,7 +349,7 @@ struct CollectionTableView: View {
     private func addItem() {
         let title = newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canEdit, !title.isEmpty else { return }
-        if store.addItem(title: title, brand: "", variant: "", description: "", state: store.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted, quantity: 1, tags: []) != nil {
+        if store.addItem(title: title, brand: "", variant: "", description: "", state: store.selectedCollection.map { ItemState(rawValue: $0.defaultStatusID) } ?? store.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted, quantity: 1, tags: []) != nil {
             AppTips.itemAdded.sendDonation()
         }
         newItemTitle = ""

@@ -1,4 +1,0 @@
-module SFSymbolSelector {
-header "SFSymbolSelector-Swift.h"
-export *
-}

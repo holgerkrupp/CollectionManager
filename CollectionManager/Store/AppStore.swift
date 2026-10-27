@@ -24,6 +24,9 @@ import SwiftData
     /// Set when a delete could not be applied, so the UI can explain it
     /// instead of leaving the row silently in place.
     var itemActionError: String?
+    /// A persistence failure is distinct from an empty collection and remains
+    /// visible until the user acknowledges it.
+    var persistenceError: String?
     /// An item an App Intent asked to bring on screen. The collection detail
     /// view presents it and clears it when the sheet closes.
     var openedItem: CollectionItem?
@@ -39,6 +42,7 @@ import SwiftData
         guard let repository else { return }
         isLoading = true
         collections = repository.collections()
+        reportPersistenceFailure()
         LocalNotificationPreferences.migrateLegacySettings(to: collections.map(\.id))
         selectedCollection = selectedCollection.flatMap { selected in collections.first(where: { $0.id == selected.id }) } ?? collections.first
         if case .metadata(let fieldID, _) = itemSort,
@@ -51,6 +55,7 @@ import SwiftData
         guard let repository, let collectionID = selectedCollection?.id else { items = []; webSyncs = []; return }
         isLoading = true
         items = repository.items(in: collectionID)
+        reportPersistenceFailure()
         webSyncs = repository.webSyncs(for: collectionID)
         isLoading = false
     }
@@ -64,8 +69,8 @@ import SwiftData
         isLoading = false
     }
     func select(_ collectionID: UUID?) { guard let collectionID, let collection = collections.first(where: { $0.id == collectionID }), selectedCollection?.id != collectionID else { return }; selectedCollection = collection; selectedState = nil; selectedBrand = nil; itemSort = .updatedDescending; Task { await loadSelectedCollectionInBackground() } }
-    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) { repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); loadCollections(); loadSelectedCollection() }
-    func updateCollection(_ collection: CollectionModel) { repository?.updateCollection(collection); loadCollections(); loadSelectedCollection() }
+    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) { repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); reportPersistenceFailure(); loadCollections(); loadSelectedCollection() }
+    func updateCollection(_ collection: CollectionModel) { repository?.updateCollection(collection); reportPersistenceFailure(); loadCollections(); loadSelectedCollection() }
     func addMetadataFields(_ fields: [MetadataFieldDefinition]) {
         guard var collection = selectedCollection, collection.role.canEdit, !fields.isEmpty else { return }
         let existingIDs = Set(collection.metadataFields.map(\.id))
@@ -94,8 +99,12 @@ import SwiftData
     /// Returns nil when the item was rejected as a duplicate or not editable.
     @discardableResult func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil, allowsDuplicates: Bool = false, collectionID: UUID? = nil) -> CollectionItem? {
         guard let collectionID = collectionID ?? selectedCollection?.id else { return nil }
+        if let collection = collections.first(where: { $0.id == collectionID }), collection.barcodeRequired, barcode == nil {
+            itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+            return nil
+        }
         let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
-        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { return nil }
+        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { reportPersistenceFailure(); return nil }
         if collectionID == selectedCollection?.id { items.insert(item, at: 0) }
         indexInSpotlight([item])
         Task { await syncCollections() }
@@ -108,7 +117,18 @@ import SwiftData
         if changed > 0 { loadSelectedCollection() }
         return changed
     }
-    func importDrafts(_ drafts: [ImportDraft]) { guard let repository, let collectionID = selectedCollection?.id else { return }; let entries = drafts.map { draft in (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)") }; repository.importDrafts(entries, collectionID: collectionID); loadSelectedCollection() }
+    func importDrafts(_ drafts: [ImportDraft]) {
+        guard let repository, let collection = selectedCollection else { return }
+        let accepted = drafts.filter { !collection.barcodeRequired || $0.barcode != nil }
+        if accepted.count != drafts.count {
+            itemActionError = "Some imported items were skipped because this collection requires a barcode."
+        }
+        let entries = accepted.map { draft in
+            (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)")
+        }
+        repository.importDrafts(entries, collectionID: collection.id)
+        loadSelectedCollection()
+    }
     func deduplicateItems() -> Int {
         guard let repository, let collectionID = selectedCollection?.id else { return 0 }
         let removed = repository.deduplicateItems(in: collectionID)
@@ -120,7 +140,13 @@ import SwiftData
     func deleteAllImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed }
     func applyTagRules(_ options: TagGenerationOptions) -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed }
     func applyMergedTagsToExistingItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed }
-    func updateItem(_ item: CollectionItem, previousState: ItemState) { repository?.updateItem(item, previousState: previousState); replaceItem(item); indexInSpotlight([item]) }
+    func updateItem(_ item: CollectionItem, previousState: ItemState) {
+        if let collection = collections.first(where: { $0.id == item.collectionID }), collection.barcodeRequired, item.barcode == nil {
+            itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+            return
+        }
+        repository?.updateItem(item, previousState: previousState); reportPersistenceFailure(); guard persistenceError == nil else { return }; replaceItem(item); indexInSpotlight([item])
+    }
     func setRating(_ value: Int?, for item: CollectionItem) { repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id) }
     @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? { let comment = repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment }
     @discardableResult func deleteItem(_ item: CollectionItem) async -> Bool {
@@ -307,6 +333,10 @@ import SwiftData
         }
         stats = (stored, consumed, wanted)
         rebuildVisibleItems()
+    }
+
+    private func reportPersistenceFailure() {
+        persistenceError = repository?.lastPersistenceError?.localizedDescription
     }
     private func rebuildVisibleItems() {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

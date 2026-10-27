@@ -1,5 +1,7 @@
 # Shared Collection TODO
 
+Release planning is now tracked by the focused [1.0 ship issues](https://github.com/holgerkrupp/CollectionManager/issues/16). This file is an implementation map only; issue acceptance criteria are authoritative. Last reconciled with the current code on 2026-09-27.
+
 This checklist compares the original product brief with the implementation currently in the project. Status labels:
 
 - `[x]` implemented and usable
@@ -25,8 +27,8 @@ This checklist compares the original product brief with the implementation curre
 
 - `[x]` Collections, items, and basic events persist in SwiftData and remain available offline.
 - `[~]` The app seeds demo collections on a fresh store; replace demo seeding with an onboarding/create-first-collection flow for release builds.
-- `[ ]` Add explicit SwiftData schema versions and migration tests for model changes.
-- `[ ]` Add indexes/query strategy appropriate for thousands or tens of thousands of items.
+- `[x]` Add the immutable `CollectionManagerSchemaV1`, migration plan, and persistent-store opening path. Migration fixtures/tests remain release verification work in [#5](https://github.com/holgerkrupp/CollectionManager/issues/5).
+- `[~]` Add indexes/query strategy appropriate for thousands or tens of thousands of items; baseline fixture/documentation work is tracked in [#12](https://github.com/holgerkrupp/CollectionManager/issues/12).
 - `[ ]` Capture all local writes as syncable mutations instead of saving only directly to the local store.
 
 ## P1 — Core product behavior from the brief
@@ -45,7 +47,7 @@ This checklist compares the original product brief with the implementation curre
 - `[x]` Collections can be created and edited.
 - `[x]` Each collection can add, remove, reorder, rename, recolor, and customize the icons for its statuses.
 - `[x]` Global settings screen exists using `@AppStorage`.
-- `[~]` Collection settings currently persist status labels; default state, required barcode, and default tags are UI-only and need persistence.
+- `[x]` Collection settings persist statuses, default status, barcode requirement, and metadata in local and CloudKit settings payloads. Existing payloads migrate to the first status and `false`; remaining device/sync verification is tracked in [#7](https://github.com/holgerkrupp/CollectionManager/issues/7).
 - `[~]` Collection categories now include food, video games, board games, books, music, cosmetics, pet food, other products, and custom; category-driven barcode/provider support and detail fields are wired. More templates remain to be added.
 - `[ ]` Add collection deletion/archive behavior and confirmation policy.
 
@@ -105,16 +107,31 @@ This checklist compares the original product brief with the implementation curre
 
 ## P3 — Quality, security, and platform readiness
 
-- `[ ]` Add unit tests for barcode normalization, CSV import, metadata encoding, filtering, sorting, repository CRUD, and event creation.
+- `[~]` Add unit/UI coverage for barcode normalization, CSV import, metadata encoding, filtering, sorting, repository CRUD, event creation, migrations, failure paths, and sharing; tracked in [#11](https://github.com/holgerkrupp/CollectionManager/issues/11).
 - `[ ]` Add CloudKit integration tests with an in-memory/local fake and a real development-container test target.
 - `[ ]` Add UI tests for add/edit/import/settings/share flows.
-- `[ ]` Replace swallowed `try?` persistence/network errors with typed errors and user-facing diagnostics.
+- `[~]` Persistence save failures now roll back, log a privacy-safe typed error, and are surfaced by the startup/recovery and destructive-operation paths. Finish the repository fetch audit in [#4](https://github.com/holgerkrupp/CollectionManager/issues/4).
 - `[ ]` Add accessibility labels, Dynamic Type review, VoiceOver order, and reduced-motion support.
 - `[ ]` Add localization and String Catalog coverage.
 - `[ ]` Add privacy strings for camera/photos/iCloud and review entitlements before App Store submission.
 - `[ ]` Add iPad split-view layouts and later macOS conditional presentation support.
 - `[ ]` Add structured logging and privacy-safe diagnostics.
-- `[ ]` Review the deployment target and supported devices after the Xcode/SDK version is finalized.
+- `[x]` 1.0 platform scope is iPhone/iPad/macOS with aligned project/target settings. Archive/device validation remains in [#14](https://github.com/holgerkrupp/CollectionManager/issues/14).
+
+## Focused release work
+
+- [#2](https://github.com/holgerkrupp/CollectionManager/issues/2) clean-clone reproducibility and CI build hygiene
+- [#3](https://github.com/holgerkrupp/CollectionManager/issues/3) persistent-store startup recovery
+- [#4](https://github.com/holgerkrupp/CollectionManager/issues/4) complete typed persistence error propagation
+- [#5](https://github.com/holgerkrupp/CollectionManager/issues/5) schema fixtures and migration tests
+- [#8](https://github.com/holgerkrupp/CollectionManager/issues/8) adaptive edit-session regression coverage
+- [#9](https://github.com/holgerkrupp/CollectionManager/issues/9) incremental CloudKit validation and conflict tests
+- [#10](https://github.com/holgerkrupp/CollectionManager/issues/10) production CloudKit deployment and real-account matrix
+- [#11](https://github.com/holgerkrupp/CollectionManager/issues/11) automated tests and clean-clone CI
+- [#12](https://github.com/holgerkrupp/CollectionManager/issues/12) performance baselines
+- [#13](https://github.com/holgerkrupp/CollectionManager/issues/13) privacy/accessibility/localization/support verification
+- [#14](https://github.com/holgerkrupp/CollectionManager/issues/14) archive and platform verification
+- [#15](https://github.com/holgerkrupp/CollectionManager/issues/15) repository documentation
 
 ## Current implementation entry points
 

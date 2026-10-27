@@ -1,0 +1,9 @@
+{
+  "version" : "1.0",
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Your library needs attention" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Your library needs attention" } } } },
+    "Opening your library…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Opening your library…" } } } },
+    "Export store copy" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Export store copy" } } } }
+  }
+}

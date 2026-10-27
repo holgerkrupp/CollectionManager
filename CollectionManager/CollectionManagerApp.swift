@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import CloudKit
 import AppIntents
+import OSLog
 #if os(iOS)
 import UIKit
 
@@ -18,6 +19,11 @@ final class CloudShareAppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata) {
         CloudShareInvitationInbox.shared.receive(metadata)
+    }
+
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        NotificationCenter.default.post(name: .collectionManagerCloudKitDidChange, object: nil)
+        return .newData
     }
 }
 
@@ -41,6 +47,10 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 #endif
+
+extension Notification.Name {
+    static let collectionManagerCloudKitDidChange = Notification.Name("CollectionManager.cloudKitDidChange")
+}
 
 @MainActor final class CloudShareInvitationInbox {
     static let shared = CloudShareInvitationInbox()
@@ -78,77 +88,73 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
     @NSApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
-    let container: ModelContainer
+    @State private var container: ModelContainer?
+    @State private var startupFailure: StoreStartupFailure?
     @State private var store: AppStore
     init() {
         AppTips.configure()
-        let models: Schema = Schema([
-            CollectionRecord.self,
-            CollectionMemberRecord.self,
-            ItemRecord.self,
-            ItemRatingRecord.self,
-            ItemCommentRecord.self,
-            EventRecord.self,
-            WebSyncRecord.self,
-            SyncMutationRecord.self,
-            CloudSyncStateRecord.self
-        ])
-        let configuration = ModelConfiguration(isStoredInMemoryOnly: false, cloudKitDatabase: .none)
-
-        // Keep the UI launchable if a local store is temporarily unreadable.
-        container = (try? ModelContainer(for: models, configurations: configuration))
-            ?? (try? ModelContainer(for: models, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
-            ?? Self.unrecoverableContainer()
-        WebSyncScheduler.register(container: container)
+        let openedContainer: ModelContainer?
+        let failure: StoreStartupFailure?
+        do {
+            openedContainer = try PersistentStoreBootstrap.makeContainer()
+            failure = nil
+        } catch {
+            openedContainer = nil
+            failure = PersistentStoreBootstrap.failure(for: error)
+        }
+        _container = State(initialValue: openedContainer)
+        _startupFailure = State(initialValue: failure)
 
         // App Intents can run in the background before any window exists,
         // so the store is configured here instead of when a scene activates.
         let store = AppStore()
-        store.configure(context: container.mainContext, container: container)
+        if let openedContainer {
+            store.configure(context: openedContainer.mainContext, container: openedContainer)
+            WebSyncScheduler.register(container: openedContainer)
+        }
         _store = State(initialValue: store)
-        AppDependencyManager.shared.add(dependency: store)
-    }
-
-    private static func unrecoverableContainer() -> ModelContainer {
-        fatalError("CollectionManager could not create a SwiftData container.")
+        if openedContainer != nil {
+            AppDependencyManager.shared.add(dependency: store)
+        }
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(store)
-                .task(id: scenePhase) {
-                    guard scenePhase == .active else { return }
-                    store.configure(context: container.mainContext, container: container)
-                    CloudShareInvitationInbox.shared.install { metadata in
-                        await store.acceptShare(metadata: metadata)
-                    }
-                    store.loadCollections()
-                    WebSyncScheduler.schedule(context: container.mainContext)
-                    // Keep launch local and responsive. Sync starts after the
-                    // first frame and is skipped when the process has no
-                    // CloudKit entitlement (for example an unsigned simulator build).
-                    await Task.yield()
-                    await store.loadSelectedCollectionInBackground()
-                    await store.syncCollections()
-                    await store.updateSpotlightIndex()
-
-                    // CloudKit collaboration changes can arrive while the app
-                    // remains open. Refresh periodically while active so edits
-                    // from other participants appear without a relaunch.
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(30))
-                        guard !Task.isCancelled else { return }
-                        await store.syncCollections()
-                    }
+            Group {
+                if let container {
+                    RootView()
+                        .environment(store)
+                        .task(id: scenePhase) {
+                            guard scenePhase == .active else { return }
+                            store.configure(context: container.mainContext, container: container)
+                            CloudShareInvitationInbox.shared.install { metadata in
+                                await store.acceptShare(metadata: metadata)
+                            }
+                            store.loadCollections()
+                            WebSyncScheduler.schedule(context: container.mainContext)
+                            await Task.yield()
+                            await store.loadSelectedCollectionInBackground()
+                            await store.syncCollections()
+                            await store.updateSpotlightIndex()
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: .collectionManagerCloudKitDidChange)) { _ in
+                            Task { await store.syncCollections() }
+                        }
+                        .onOpenURL { url in Task { await store.acceptShare(from: url) } }
+                } else if let startupFailure {
+                    StoreRecoveryView(failure: startupFailure, retry: retryStore)
+                } else {
+                    ProgressView("Opening your library…")
                 }
-                .onOpenURL { url in Task { await store.acceptShare(from: url) } }
+            }
         }
-        .modelContainer(container)
         #if os(macOS)
         Settings {
-            SettingsView()
-                .environment(store)
+            if container != nil {
+                SettingsView().environment(store)
+            } else if let startupFailure {
+                StoreRecoveryView(failure: startupFailure, retry: retryStore)
+            }
         }
 
         // Collection settings get a real, resizable window rather than a sheet:
@@ -158,9 +164,21 @@ final class CloudShareAppDelegate: NSObject, NSApplicationDelegate {
             CollectionSettingsWindowView(collectionID: collectionID)
                 .environment(store)
         }
-        .modelContainer(container)
         .defaultSize(width: 940, height: 600)
         .windowResizability(.contentMinSize)
         #endif
+    }
+
+    private func retryStore() {
+        do {
+            let openedContainer = try PersistentStoreBootstrap.makeContainer()
+            container = openedContainer
+            startupFailure = nil
+            store.configure(context: openedContainer.mainContext, container: openedContainer)
+            WebSyncScheduler.register(container: openedContainer)
+            AppDependencyManager.shared.add(dependency: store)
+        } catch {
+            startupFailure = PersistentStoreBootstrap.failure(for: error)
+        }
     }
 }

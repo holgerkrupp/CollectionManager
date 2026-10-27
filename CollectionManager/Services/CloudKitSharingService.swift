@@ -53,11 +53,34 @@ struct CloudSyncMutation: Sendable {
     let operation: String
 }
 
+private final class CloudKitChangeTokenStore {
+    private let defaults = UserDefaults.standard
+
+    func load(scope: CKDatabase.Scope, zoneID: CKRecordZone.ID) -> CKServerChangeToken? {
+        guard let data = defaults.data(forKey: key(scope: scope, zoneID: zoneID)) else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
+    }
+
+    func save(_ token: CKServerChangeToken, scope: CKDatabase.Scope, zoneID: CKRecordZone.ID) {
+        guard let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) else { return }
+        defaults.set(data, forKey: key(scope: scope, zoneID: zoneID))
+    }
+
+    func remove(scope: CKDatabase.Scope, zoneID: CKRecordZone.ID) {
+        defaults.removeObject(forKey: key(scope: scope, zoneID: zoneID))
+    }
+
+    private func key(scope: CKDatabase.Scope, zoneID: CKRecordZone.ID) -> String {
+        "cloudSync.changeToken.\(scope.rawValue).\(zoneID.ownerName).\(zoneID.zoneName)"
+    }
+}
+
 final class CloudKitSharingService {
     static let containerIdentifier = "iCloud.de.holgerkrupp.CollectionManager"
     private static let bootstrapKey = "cloudSync.didBootstrapLocalData"
     private static let imageBootstrapKey = "cloudSync.didUploadImagesV1"
     private var injectedContainer: CKContainer?
+    private let changeTokenStore = CloudKitChangeTokenStore()
     private lazy var container: CKContainer = injectedContainer ?? CKContainer(identifier: Self.containerIdentifier)
 
     init(container: CKContainer? = nil) { injectedContainer = container }
@@ -390,15 +413,19 @@ final class CloudKitSharingService {
     ) async throws {
         guard !saving.isEmpty || !deleting.isEmpty else { return }
         let result: (saveResults: [CKRecord.ID: Result<CKRecord, Error>], deleteResults: [CKRecord.ID: Result<Void, Error>])
-        do {
-            result = try await database.modifyRecords(
-                saving: saving,
-                deleting: deleting,
-                savePolicy: .changedKeys,
-                atomically: atomically
-            )
-        } catch {
-            throw underlyingCloudKitCause(in: error)
+        var attempt = 0
+        while true {
+            do {
+                result = try await database.modifyRecords(saving: saving, deleting: deleting, savePolicy: .changedKeys, atomically: atomically)
+                break
+            } catch {
+                let cause = underlyingCloudKitCause(in: error)
+                guard attempt < 3, isTransientCloudKitError(cause) else { throw cause }
+                let retryAfter = (cause as? CKError)?.userInfo[CKErrorRetryAfterKey] as? TimeInterval
+                    ?? pow(2, Double(attempt))
+                try await Task.sleep(for: .seconds(min(max(retryAfter, 0.25), 30)))
+                attempt += 1
+            }
         }
         let errors = result.saveResults.values.compactMap { result -> Error? in
             guard case .failure(let error) = result else { return nil }
@@ -425,10 +452,17 @@ final class CloudKitSharingService {
         return cloudError.code == .batchRequestFailed || cloudError.code == .partialFailure
     }
 
+    private func isTransientCloudKitError(_ error: Error) -> Bool {
+        guard let cloudError = error as? CKError else { return false }
+        let transientCodes: [CKError.Code] = [.networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy, .notAuthenticated, .accountTemporarilyUnavailable]
+        return transientCodes.contains(cloudError.code)
+    }
+
     private func fetchSnapshots(from database: CKDatabase) async throws -> [CloudCollectionSnapshot] {
         let zones = try await database.allRecordZones()
         var snapshots: [CloudCollectionSnapshot] = []
         for zone in zones where zone.zoneID.zoneName != CKRecordZone.default().zoneID.zoneName {
+            await ensureSubscription(for: zone.zoneID, in: database)
             let zoneRecords: [CKRecord]
             let deletedItemIDs: [UUID]
             do {
@@ -446,10 +480,30 @@ final class CloudKitSharingService {
                 let comments = zoneRecords.filter { $0.recordType == "CollectionItemComment" }.compactMap(comment(from:))
                 let settings = decodeSettings(root["settingsJSON"] as? String)
                 let sharedWith = await sharedParticipants(for: root, in: database)
-                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, role: database.databaseScope == .shared ? .editor : .owner), items: items, deletedItemIDs: deletedItemIDs, events: events, ratings: ratings, comments: comments, sharedWith: sharedWith))
+                snapshots.append(CloudCollectionSnapshot(collection: CollectionModel(id: id, name: root["name"] as? String ?? "Collection", icon: root["icon"] as? String ?? "square.stack", subtitle: root["subtitle"] as? String ?? "Shared", category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags, metadataFields: settings.metadataFields, defaultStatusID: settings.defaultStatusID ?? settings.statuses.first?.id ?? ItemState.wanted.rawValue, barcodeRequired: settings.barcodeRequired, role: database.databaseScope == .shared ? .editor : .owner), items: items, deletedItemIDs: deletedItemIDs, events: events, ratings: ratings, comments: comments, sharedWith: sharedWith))
             }
         }
         return snapshots
+    }
+
+    private func ensureSubscription(for zoneID: CKRecordZone.ID, in database: CKDatabase) async {
+        let key = "cloudSync.subscription.\(database.databaseScope.rawValue).\(zoneID.ownerName).\(zoneID.zoneName)"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        let subscription = CKRecordZoneSubscription(zoneID: zoneID)
+        let info = CKSubscription.NotificationInfo()
+        info.shouldSendContentAvailable = true
+        subscription.notificationInfo = info
+        do {
+            _ = try await database.save(subscription)
+            UserDefaults.standard.set(true, forKey: key)
+        } catch let error as CKError where error.code == .serverRejectedRequest || error.code == .constraintViolation {
+            // A previously deployed schema or a permission transition may not
+            // allow a subscription yet. Foreground refresh remains the safety
+            // net and the next successful sync retries this setup.
+        } catch {
+            // Subscription setup is auxiliary; never discard the outbox when
+            // a notification registration fails.
+        }
     }
 
     private func sharedParticipants(for root: CKRecord, in database: CKDatabase) async -> [CloudCollectionParticipant]? {
@@ -470,29 +524,31 @@ final class CloudKitSharingService {
     }
 
     private func records(in zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> ([CKRecord], [UUID]) {
-        // Zone changes enumerate custom-zone records without CKQuery indexes.
-        // Passing nil starts from the beginning, which is appropriate here
-        // because the local merge currently expects a complete snapshot.
-        var changeToken: CKServerChangeToken?
+        // Resume from the last successfully completed page. Tokens are scoped
+        // by database and zone, so private/shared collections do not collide.
+        var changeToken = changeTokenStore.load(scope: database.databaseScope, zoneID: zoneID)
         var records: [CKRecord] = []
         var deletedItemIDs: [UUID] = []
         var moreComing = true
         while moreComing {
-            let page = try await database.recordZoneChanges(
-                inZoneWith: zoneID,
-                since: changeToken,
-                desiredKeys: nil,
-                resultsLimit: 400
-            )
-            records.append(contentsOf: page.modificationResultsByID.values.compactMap { result in
-                try? result.get().record
-            })
-            deletedItemIDs.append(contentsOf: page.deletions
-                .filter { $0.recordType == "CollectionItem" }
-                .compactMap { UUID(uuidString: $0.recordID.recordName) })
-            changeToken = page.changeToken
-            moreComing = page.moreComing
+            do {
+                let page = try await database.recordZoneChanges(inZoneWith: zoneID, since: changeToken, desiredKeys: nil, resultsLimit: 400)
+                records.append(contentsOf: page.modificationResultsByID.values.compactMap { result in
+                    try? result.get().record
+                })
+                deletedItemIDs.append(contentsOf: page.deletions
+                    .filter { $0.recordType == "CollectionItem" }
+                    .compactMap { UUID(uuidString: $0.recordID.recordName) })
+                changeToken = page.changeToken
+                moreComing = page.moreComing
+            } catch let error as CKError where error.code == .changeTokenExpired {
+                // An expired token is a deliberate full-zone rebuild. Do not
+                // keep or advance the stale token until the rebuild completes.
+                changeTokenStore.remove(scope: database.databaseScope, zoneID: zoneID)
+                return try await self.records(in: zoneID, database: database)
+            }
         }
+        if let changeToken { changeTokenStore.save(changeToken, scope: database.databaseScope, zoneID: zoneID) }
 
         // A participant's first shared-zone change request can succeed before
         // CloudKit includes the hierarchy's existing records in that feed. In
@@ -543,7 +599,7 @@ final class CloudKitSharingService {
         return records
     }
 
-    private func settingsJSON(for collection: CollectionModel) -> String { let payload = CollectionSettingsPayload(category: collection.category, statuses: collection.statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields); return (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}" }
+    private func settingsJSON(for collection: CollectionModel) -> String { let payload = CollectionSettingsPayload(category: collection.category, statuses: collection.statuses, mergedTags: collection.mergedTags, metadataFields: collection.metadataFields, defaultStatusID: collection.defaultStatusID, barcodeRequired: collection.barcodeRequired); return (try? String(data: JSONEncoder().encode(payload), encoding: .utf8)) ?? "{}" }
     private func decodeSettings(_ string: String?) -> CollectionSettingsPayload { guard let string, let data = string.data(using: .utf8), let payload = try? JSONDecoder().decode(CollectionSettingsPayload.self, from: data) else { return CollectionSettingsPayload() }; return payload }
     private func zoneID(for collectionID: UUID) -> CKRecordZone.ID { CKRecordZone.ID(zoneName: "collection-\(collectionID.uuidString)", ownerName: CKCurrentUserDefaultName) }
     private func record(for item: CollectionItem, zoneID: CKRecordZone.ID, parent: CKRecord.ID) -> CKRecord {

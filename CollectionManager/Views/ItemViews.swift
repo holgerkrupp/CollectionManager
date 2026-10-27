@@ -532,7 +532,12 @@ struct AddItemView: View {
             #if os(iOS)
             .fullScreenCover(isPresented: $showingCamera) { PhotoCaptureView { handleImage($0) } }
             #endif
-            .onAppear { if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) } }
+            .onAppear {
+                if let collection = store.selectedCollection {
+                    state = ItemState(rawValue: collection.defaultStatusID)
+                }
+                if !store.statuses.contains(where: { $0.id == state.rawValue }), let first = store.statuses.first { state = ItemState(rawValue: first.id) }
+            }
             .onDisappear { lookupTask?.cancel() }
             .task { for await shouldDisplay in siriTip.shouldDisplayUpdates { showsSiriTip = shouldDisplay } }
         }

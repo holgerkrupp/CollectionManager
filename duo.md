@@ -1,5 +1,11 @@
 # Collection Manager on iPhone Duo
 
+## Release scope
+
+For 1.0, the required adaptive-layout work is data integrity: preserve table/card drafts across size-class, Split View, resize, rotation, and future fold transitions; expose explicit Save and Revert; and keep controls accessible and out of reserved regions. The table editor no longer commits from `onDisappear`.
+
+Three-column inspectors, ArrangementView experiments, tabletop-specific compositions, and other Duo enhancements are post-1.0 unless device testing identifies a release-blocking accessibility or data-integrity issue. Track active release work in [GitHub issue #16](https://github.com/holgerkrupp/CollectionManager/issues/16), not in this design note.
+
 Analysis date: 2026-09-14. This plan applies Apple’s iPhone Duo guidance to the current SwiftUI collection-management app.
 
 Revision 2026-09-14 (second pass): re-read the published HIG page and added layout options per surface, control ownership, bar-free scanner surfaces, an explicit open/close transition contract, and the conditional reserved regions. Nothing from the first pass was removed.

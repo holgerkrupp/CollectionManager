@@ -18,9 +18,26 @@ import SwiftData
 }
 
 @Model final class CloudSyncStateRecord {
-    var id: UUID = UUID(); var collectionID: UUID = UUID(); var stateRawValue: String = "idle"; var lastSyncedAt: Date?; var lastError: String?; var pendingCount: Int = 0
+    var id: UUID = UUID(); var collectionID: UUID = UUID(); var stateRawValue: String = "idle"; var lastSyncedAt: Date?; var lastError: String?; var pendingCount: Int = 0; var privateChangeTokenData: Data?; var sharedChangeTokenData: Data?; var recoveryAttempts: Int = 0
     init(collectionID: UUID) { self.collectionID = collectionID }
     var state: CollectionSyncState { get { CollectionSyncState(rawValue: stateRawValue) ?? .idle } set { stateRawValue = newValue.rawValue } }
+}
+
+/// The schema shipped with CollectionManager 1.0. Released schemas are
+/// immutable: add a new version and a migration stage instead of changing
+/// this model list in place.
+enum CollectionManagerSchemaV1: VersionedSchema {
+    static let versionIdentifier = Schema.Version(1, 0, 0)
+    static let models: [any PersistentModel.Type] = [
+        CollectionRecord.self, CollectionMemberRecord.self, ItemRecord.self,
+        ItemRatingRecord.self, ItemCommentRecord.self, EventRecord.self,
+        WebSyncRecord.self, SyncMutationRecord.self, CloudSyncStateRecord.self
+    ]
+}
+
+enum CollectionManagerMigrationPlan: SchemaMigrationPlan {
+    static let schemas: [any VersionedSchema.Type] = [CollectionManagerSchemaV1.self]
+    static let stages: [MigrationStage] = []
 }
 
 @Model final class ItemRecord {

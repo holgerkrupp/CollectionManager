@@ -1,0 +1,25 @@
+name: CollectionManager CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  clean-clone-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no sibling package or generated build is required
+        run: |
+          test ! -e ../SFSymbolSelector
+          test "$(git ls-files build | wc -l | tr -d ' ')" = "0"
+          ! rg -n 'SFSymbolSelector|\.\./SFSymbolSelector' CollectionManager.xcodeproj CollectionManager
+      - name: Build macOS Release
+        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-macOS" CODE_SIGNING_ALLOWED=NO build
+      - name: Build iOS Release-compatible configuration
+        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-iOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Validate project and test sources
+        run: |
+          xcodebuild -list -project CollectionManager.xcodeproj
+      - name: Run unit tests
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" CODE_SIGNING_ALLOWED=NO
