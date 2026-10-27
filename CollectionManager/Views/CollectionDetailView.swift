@@ -28,7 +28,7 @@ struct CollectionDetailView: View {
             .onSubmit(of: .search) { AppTips.listFiltered.sendDonation() }
             .task(id: store.items.count) { TableLayoutTip.itemCount = store.items.count }
             .onChange(of: prefersTableLayout, initial: true) { _, usesTable in if usesTable { tableLayoutTip.invalidate(reason: .actionPerformed) } }
-            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if supportsTableLayout { layoutPicker }; moreMenu; Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent).help("Add a new item to this collection") } }
+            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if supportsTableLayout { layoutPicker }; moreMenu; Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent).help("Add a new item to this collection").disabled(store.selectedCollection?.role.canEdit != true) } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
             .sheet(item: $store.openedItem) { EditItemView(item: $0) }
             .appEntityIdentifier(store.selectedCollection.map { EntityIdentifier(for: CollectionEntity.self, identifier: $0.id) })

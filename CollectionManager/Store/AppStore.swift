@@ -234,9 +234,13 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; return false }
     }
-    func setRating(_ value: Int?, for item: CollectionItem) {
-        do { try repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id)
-        } catch { persistenceError = error.localizedDescription }
+    @discardableResult func setRating(_ value: Int?, for item: CollectionItem) -> Bool {
+        guard let repository else { return false }
+        do {
+            try repository.setRating(for: item, value: value, participant: .current)
+            refreshItem(item.id)
+            return true
+        } catch { persistenceError = error.localizedDescription; return false }
     }
     @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? {
         do { let comment = try repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment

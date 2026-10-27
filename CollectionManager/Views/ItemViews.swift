@@ -68,7 +68,7 @@ struct ItemCard: View {
         .onTapGesture { showingEdit = true }
         .contextMenu {
             Button { showingEdit = true } label: { Label("Edit", systemImage: "pencil") }
-            Button(role: .destructive) { Task { await store.deleteItem(item) } } label: { Label("Delete", systemImage: "trash") }
+            Button(role: .destructive) { Task { await store.deleteItem(item) } } label: { Label("Delete", systemImage: "trash") }.disabled(store.collections.first(where: { $0.id == item.collectionID })?.role.canEdit != true)
         }
         .sheet(isPresented: $showingEdit) { EditItemView(item: item) }
     }
@@ -715,6 +715,7 @@ struct EditItemView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss; let original: CollectionItem
     @State private var title: String; @State private var brand: String; @State private var variant: String; @State private var description: String; @State private var quantity: Int; @State private var tags: String; @State private var metadata: [String: MetadataValue]; @State private var state: ItemState; @State private var barcode: Barcode?; @State private var imageData: Data?; @State private var sourceSnapshot: ProductSourceSnapshot?; @State private var pickerItem: PhotosPickerItem?; @State private var recognitionMessage: String?; @State private var sourceMessage: String?; @State private var isLoadingSource = false; @State private var showingMetadataMapping = false; @State private var ratings: [ItemRating]; @State private var comments: [ItemComment]; @State private var commentDraft = ""; @State private var selectedRating: Int
     init(item: CollectionItem) { original = item; _title = State(initialValue: item.title); _brand = State(initialValue: item.brand); _variant = State(initialValue: item.variant); _description = State(initialValue: item.itemDescription); _quantity = State(initialValue: item.quantity); _tags = State(initialValue: item.tags.joined(separator: ", ")); _metadata = State(initialValue: item.metadata); _state = State(initialValue: item.state); _barcode = State(initialValue: item.barcode); _imageData = State(initialValue: item.imageData); _sourceSnapshot = State(initialValue: item.sourceSnapshot); _ratings = State(initialValue: item.ratings); _comments = State(initialValue: item.comments); _selectedRating = State(initialValue: item.ratings.first(where: { $0.participantID == CollaboratorIdentity.current.id })?.value ?? 0) }
+    private var canEdit: Bool { store.collections.first(where: { $0.id == original.collectionID })?.role.canEdit == true }
     var body: some View {
         let category = store.selectedCollection?.category ?? .custom
         NavigationStack {
@@ -755,12 +756,13 @@ struct EditItemView: View {
                     }
                 }
                 annotationsSection
-                Section { Button("Delete item", role: .destructive) { dismiss(); Task { await store.deleteItem(original) } } }
+                Section { Button("Delete item", role: .destructive) { Task { if await store.deleteItem(original) { dismiss() } } } }
             }
-            .navigationTitle("Edit item")
+            .disabled(!canEdit)
+            .navigationTitle(canEdit ? "Edit item" : "Item details")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; if store.updateItem(item, previousState: previous) { dismiss() } } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; if store.updateItem(item, previousState: previous) { dismiss() } }.disabled(!canEdit) }
             }
             .sheet(isPresented: $showingMetadataMapping) {
                 if let sourceSnapshot { ProductMetadataMappingView(snapshot: sourceSnapshot, metadata: $metadata) }
@@ -825,7 +827,10 @@ struct EditItemView: View {
                 Text("Your rating")
                 Spacer()
                 RatingPicker(value: $selectedRating) { value in
-                    store.setRating(value == 0 ? nil : value, for: original)
+                    guard store.setRating(value == 0 ? nil : value, for: original) else {
+                        selectedRating = ratings.first(where: { $0.participantID == CollaboratorIdentity.current.id })?.value ?? 0
+                        return
+                    }
                     let identity = CollaboratorIdentity.current
                     ratings.removeAll { $0.participantID == identity.id }
                     if value > 0 { ratings.append(ItemRating(id: UUID(), itemID: original.id, participantID: identity.id, participantName: identity.displayName, value: value, updatedAt: .now)) }

@@ -24,6 +24,29 @@ import SwiftData
         XCTAssertTrue(cloudPayload.barcodeRequired)
     }
 
+    func testSettingsRoundTripThroughActualRootRecordsBetweenStores() async throws {
+        let ownerContainer = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let owner = CollectionRepository(context: ModelContext(ownerContainer))
+        try owner.addCollection(name: "Shared rules", icon: "books.vertical", subtitle: "")
+        var collection = try XCTUnwrap(owner.collections().first)
+        collection.defaultStatusID = "consumed"; collection.barcodeRequired = true
+        try owner.updateCollection(collection)
+        let ownerCodec = CollectionRecordCodec(modelContainer: ownerContainer, containerIdentifier: "iCloud.example.settings", environment: .development, accountPartitionIdentifier: "synthetic-account")
+        try await ownerCodec.beginHandoff()
+        let plans = try await ownerCodec.sharePlans()
+        let root = try XCTUnwrap(plans.first?.rootRecord)
+        let receiverContainer = try ModelContainer(for: Schema(CollectionManagerSchemaV2.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let receiverCodec = CollectionRecordCodec(modelContainer: receiverContainer, containerIdentifier: "iCloud.example.settings", environment: .development, accountPartitionIdentifier: "synthetic-account")
+        try await receiverCodec.beginHandoff()
+        try await receiverCodec.registerCollection(collectionID: collection.id, zoneID: root.recordID.zoneID, scope: .private, role: .owner)
+        try await receiverCodec.applyRemoteChanges(records: [root], deletedRecordIDs: [], in: .private)
+        let receiver = CollectionRepository(context: ModelContext(receiverContainer))
+        let received = try XCTUnwrap(receiver.collections().first)
+        XCTAssertEqual(received.defaultStatusID, "consumed")
+        XCTAssertTrue(received.barcodeRequired)
+        XCTAssertTrue(try receiver.pendingMutations().isEmpty)
+    }
+
     private func writeSettings(at url: URL) throws {
         let container = try PersistentStoreBootstrap.makeContainer(at: url)
         let repository = CollectionRepository(context: ModelContext(container))
