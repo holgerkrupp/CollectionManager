@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "id": "88C7C384-72F4-45BB-AC6D-14C28A53F607",
+      "name": "Core",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {},
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:CollectionManager.xcodeproj",
+        "identifier": "000000000000000200000000",
+        "name": "CollectionManagerTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:CollectionManager.xcodeproj",
+        "identifier": "000000000000000300000003",
+        "name": "CollectionManagerUITests"
+      }
+    }
+  ],
+  "version": 1
+}

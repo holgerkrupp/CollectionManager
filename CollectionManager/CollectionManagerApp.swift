@@ -92,7 +92,7 @@ extension Notification.Name {
     @State private var startupFailure: StoreStartupFailure?
     @State private var store: AppStore
     init() {
-        AppTips.configure()
+        if !Self.isRunningTests { AppTips.configure() }
         let openedContainer: ModelContainer?
         let failure: StoreStartupFailure?
         do {
@@ -110,7 +110,7 @@ extension Notification.Name {
         let store = AppStore()
         if let openedContainer {
             store.configure(context: openedContainer.mainContext, container: openedContainer)
-            WebSyncScheduler.register(container: openedContainer)
+            if !Self.isRunningTests { WebSyncScheduler.register(container: openedContainer) }
         }
         _store = State(initialValue: store)
         if openedContainer != nil {
@@ -125,7 +125,7 @@ extension Notification.Name {
                     RootView()
                         .environment(store)
                         .task(id: scenePhase) {
-                            guard scenePhase == .active else { return }
+                            guard scenePhase == .active, !Self.isRunningTests else { return }
                             store.configure(context: container.mainContext, container: container)
                             CloudShareInvitationInbox.shared.install { metadata in
                                 await store.acceptShare(metadata: metadata)
@@ -169,13 +169,23 @@ extension Notification.Name {
         #endif
     }
 
+    private static var isRunningTests: Bool {
+        #if DEBUG
+        NSClassFromString("XCTestCase") != nil || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil ||
+        ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        #else
+        false
+        #endif
+    }
+
     private func retryStore() {
         do {
             let openedContainer = try PersistentStoreBootstrap.makeContainer()
             container = openedContainer
             startupFailure = nil
             store.configure(context: openedContainer.mainContext, container: openedContainer)
-            WebSyncScheduler.register(container: openedContainer)
+            if !Self.isRunningTests { WebSyncScheduler.register(container: openedContainer) }
             AppDependencyManager.shared.add(dependency: store)
         } catch {
             startupFailure = PersistentStoreBootstrap.failure(for: error)

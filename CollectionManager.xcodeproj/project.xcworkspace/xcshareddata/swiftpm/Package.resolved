@@ -1,0 +1,14 @@
+{
+  "originHash" : "6467af170d68fc3cb97093efebe90a33eb991335a056878efc008742fb1c3357",
+  "pins" : [
+    {
+      "identity" : "cloudkitcollaborationkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/holgerkrupp/CloudKitCollaborationKit",
+      "state" : {
+        "revision" : "239da36a97d8f4904786e49ae0354f93f0a5f5c3"
+      }
+    }
+  ],
+  "version" : 3
+}

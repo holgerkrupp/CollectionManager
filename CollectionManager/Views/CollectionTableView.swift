@@ -9,8 +9,7 @@ import TipKit
 /// in one pass without opening a sheet per item.
 struct CollectionTableView: View {
     @Environment(AppStore.self) private var store
-    @State private var drafts: [UUID: CollectionItem] = [:]
-    @State private var newItemTitle = ""
+    @Bindable var editSession: CollectionEditSession
     @State private var selection: Set<UUID> = []
     @State private var sortOrder: [KeyPathComparator<CollectionItem>] = [KeyPathComparator(\.updatedAt, order: .reverse)]
     // The filter bar and the column headers are two ways to order the same
@@ -32,11 +31,7 @@ struct CollectionTableView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
         .onChange(of: sortOrder) { _, _ in usesColumnSort = true }
         .onChange(of: store.itemSort) { _, _ in usesColumnSort = false }
-        // Leaving the table keeps the edits: they are the user's own typing and
-        // discarding them silently would be the surprising behaviour.
-        // Drafts intentionally remain owned by this edit session. Adaptive
-        // layout changes must not commit or discard user input as a side effect
-        // of a child view disappearing.
+        // The AppStore-owned session outlives either adaptive representation.
     }
 
     private var rows: [CollectionItem] {
@@ -109,13 +104,13 @@ struct CollectionTableView: View {
                     .foregroundStyle(.secondary)
             }
             if canEdit {
-                TextField("Add item…", text: $newItemTitle)
+                TextField("Add item…", text: $editSession.newItemTitle)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 200)
                     .onSubmit(addItem)
                 Button("Add", action: addItem)
                     .buttonStyle(.bordered)
-                    .disabled(newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(editSession.newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Spacer()
             if canEdit, !selection.isEmpty {
@@ -135,7 +130,7 @@ struct CollectionTableView: View {
                 Text("\(pendingChangeCount) unsaved change\(pendingChangeCount == 1 ? "" : "s")")
                     .font(.subheadline)
                     .foregroundStyle(.orange)
-                Button("Revert") { drafts.removeAll() }
+                Button("Revert") { editSession.revert() }
                     .buttonStyle(.bordered)
                     .help("Discard the edits you haven’t saved")
             }
@@ -154,7 +149,7 @@ struct CollectionTableView: View {
     private func titleCell(_ item: CollectionItem) -> some View {
         HStack(spacing: 6) {
             textCell(binding(for: item).title)
-            if drafts[item.id] != nil {
+            if editSession.drafts[item.id] != nil {
                 Image(systemName: "pencil.circle.fill")
                     .foregroundStyle(.orange)
                     .accessibilityLabel("Unsaved changes")
@@ -304,18 +299,12 @@ struct CollectionTableView: View {
     // MARK: - Editing
 
     private var canEdit: Bool { store.selectedCollection?.role.canEdit == true }
-    private var pendingChangeCount: Int { drafts.count }
+    private var pendingChangeCount: Int { editSession.pendingChangeCount }
 
     private func binding(for item: CollectionItem) -> Binding<CollectionItem> {
         Binding(
-            get: { drafts[item.id] ?? item },
-            set: { updated in
-                if updated == item {
-                    drafts.removeValue(forKey: item.id)
-                } else {
-                    drafts[item.id] = updated
-                }
-            }
+            get: { editSession.value(for: item) },
+            set: { editSession.set($0, original: item) }
         )
     }
 
@@ -333,34 +322,29 @@ struct CollectionTableView: View {
         return value.displayValue
     }
 
-    private func commitAll() {
-        guard canEdit, !drafts.isEmpty else { drafts.removeAll(); return }
-        let originals = Dictionary(store.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for (id, draft) in drafts {
-            guard let original = originals[id], original != draft else { continue }
-            var item = draft
-            item.updatedAt = .now
-            item.consumedAt = item.state == .consumed ? (original.consumedAt ?? .now) : nil
-            store.updateItem(item, previousState: original.state)
+    @discardableResult private func commitAll() -> Bool {
+        editSession.save(originals: store.items, canEdit: canEdit) { item, previousState in
+            store.updateItem(item, previousState: previousState)
         }
-        drafts.removeAll()
     }
 
     private func addItem() {
-        let title = newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = editSession.newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canEdit, !title.isEmpty else { return }
         if store.addItem(title: title, brand: "", variant: "", description: "", state: store.selectedCollection.map { ItemState(rawValue: $0.defaultStatusID) } ?? store.statuses.first.map { ItemState(rawValue: $0.id) } ?? .wanted, quantity: 1, tags: []) != nil {
             AppTips.itemAdded.sendDonation()
+            editSession.newItemTitle = ""
         }
-        newItemTitle = ""
     }
 
     private func applyStatus(_ state: ItemState) {
-        // The bulk update reloads every item, so pending cell edits are written
-        // back first instead of being overwritten by the reload.
-        commitAll()
-        let selected = store.items.filter { selection.contains($0.id) }
-        store.bulkUpdateState(for: selected, to: state)
+        // Changing selected row status is another draft edit, not an implicit
+        // save of every unrelated cell in the table.
+        for original in store.items where selection.contains(original.id) {
+            var draft = editSession.value(for: original)
+            draft.state = state
+            editSession.set(draft, original: original)
+        }
     }
 
     private func deletableItems(ids: Set<CollectionItem.ID>) -> [CollectionItem] {
@@ -369,10 +353,13 @@ struct CollectionTableView: View {
 
     private func deleteItems(ids: Set<CollectionItem.ID>) {
         let targets = deletableItems(ids: ids)
-        for item in targets { drafts.removeValue(forKey: item.id) }
-        selection.subtract(ids)
         Task {
-            for item in targets { await store.deleteItem(item) }
+            for item in targets {
+                if await store.deleteItem(item) {
+                    editSession.didDelete(item.id)
+                    selection.remove(item.id)
+                }
+            }
         }
     }
 

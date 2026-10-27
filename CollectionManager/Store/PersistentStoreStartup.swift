@@ -34,12 +34,25 @@ struct StoreStartupFailure: LocalizedError, Sendable {
 enum PersistentStoreBootstrap {
     static let logger = Logger(subsystem: "de.holgerkrupp.CollectionManager", category: "store-startup")
 
+    #if DEBUG
+    private static let testStoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("CollectionManager-tests-\(UUID().uuidString)", isDirectory: true)
+    #endif
+
     static var storeURL: URL {
+        #if DEBUG
+        let process = ProcessInfo.processInfo
+        if NSClassFromString("XCTestCase") != nil || process.environment["XCTestConfigurationFilePath"] != nil || process.environment["XCTestBundlePath"] != nil || process.arguments.contains("--ui-testing") {
+            if let path = process.environment["CM_TEST_STORE_PATH"], path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+                return URL(fileURLWithPath: path)
+            }
+            return testStoreDirectory.appendingPathComponent("CollectionManager.store")
+        }
+        #endif
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return applicationSupport.appendingPathComponent("CollectionManager", isDirectory: true).appendingPathComponent("CollectionManager.store")
     }
 
-    static func makeContainer() throws -> ModelContainer {
+    static func makeContainer(at storeURL: URL = storeURL) throws -> ModelContainer {
         let directory = storeURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let configuration = ModelConfiguration(url: storeURL, cloudKitDatabase: .none)
@@ -58,17 +71,40 @@ enum PersistentStoreBootstrap {
         return StoreStartupFailure(phase: recoverable ? .recoverableFailure : .unrecoverableFailure, storeURL: storeURL, errorType: String(describing: type(of: error)))
     }
 
-    /// Copies all known SQLite store members to a temporary directory. The
-    /// original files are never modified, deleted, or moved.
-    static func makeSafeExport() throws -> URL {
-        let exportDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("CollectionManager-store-(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-        let candidates = [storeURL, storeURL.appendingPathExtension("shm"), storeURL.appendingPathExtension("wal")]
-        for source in candidates where FileManager.default.fileExists(atPath: source.path) {
-            try FileManager.default.copyItem(at: source, to: exportDirectory.appendingPathComponent(source.lastPathComponent))
+    /// Recovery only: called before a container is open, so this process has no
+    /// writer. Preserve the raw database and its actual SQLite sidecars together.
+    /// Reject a concurrent external writer rather than return a partial copy.
+    static func makeSafeExport(from sourceURL: URL = storeURL, into destination: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        let manager = FileManager.default
+        let exportDirectory = destination.appendingPathComponent("CollectionManager-store-\(UUID().uuidString)", isDirectory: true)
+        let candidates = [sourceURL, URL(fileURLWithPath: sourceURL.path + "-wal"), URL(fileURLWithPath: sourceURL.path + "-shm")]
+        guard manager.fileExists(atPath: sourceURL.path) else { throw CocoaError(.fileNoSuchFile) }
+        let before = try storeMemberSignatures(candidates)
+        try manager.createDirectory(at: exportDirectory, withIntermediateDirectories: false)
+        do {
+            for source in candidates where before[source.path] != nil {
+                try manager.copyItem(at: source, to: exportDirectory.appendingPathComponent(source.lastPathComponent))
+            }
+            guard try storeMemberSignatures(candidates) == before else { throw CocoaError(.fileReadUnknown) }
+            return exportDirectory
+        } catch {
+            // Only our new incomplete export is removed; never touch originals.
+            try? manager.removeItem(at: exportDirectory)
+            throw error
         }
-        return exportDirectory
     }
+
+    private static func storeMemberSignatures(_ members: [URL]) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for member in members where FileManager.default.fileExists(atPath: member.path) {
+            let attributes = try FileManager.default.attributesOfItem(atPath: member.path)
+            let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            result[member.path] = "\(size):\(modified)"
+        }
+        return result
+    }
+
 }
 
 struct StoreRecoveryView: View {

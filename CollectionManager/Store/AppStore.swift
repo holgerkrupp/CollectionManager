@@ -7,6 +7,8 @@ import SwiftData
     private var repository: CollectionRepository?
     private var backgroundRepository: CollectionBackgroundRepository?
     private var modelContext: ModelContext?
+    var sharingSession: CollectionSharingSession?
+    let editSessions = CollectionEditSessions()
     var collections: [CollectionModel] = []
     var selectedCollection: CollectionModel?
     var items: [CollectionItem] = [] { didSet { rebuildDerivedItemState() } }
@@ -15,6 +17,7 @@ import SwiftData
     var selectedState: ItemState? { didSet { rebuildVisibleItems() } }
     var selectedBrand: String? { didSet { rebuildVisibleItems() } }
     var itemSort: ItemSort = .updatedDescending { didSet { rebuildVisibleItems() } }
+    private var searchIndex = ItemSearchIndex()
     private(set) var visibleItems: [CollectionItem] = []
     private(set) var brands: [String] = []
     private(set) var hasDateTags = false
@@ -39,38 +42,54 @@ import SwiftData
     func configure(context: ModelContext, container: ModelContainer) { guard repository == nil else { return }; modelContext = context; repository = CollectionRepository(context: context); backgroundRepository = CollectionBackgroundRepository(container: container) }
     func load() { loadCollections(); loadSelectedCollection() }
     func loadCollections() {
-        guard let repository else { return }
-        isLoading = true
-        collections = repository.collections()
-        reportPersistenceFailure()
-        LocalNotificationPreferences.migrateLegacySettings(to: collections.map(\.id))
-        selectedCollection = selectedCollection.flatMap { selected in collections.first(where: { $0.id == selected.id }) } ?? collections.first
-        if case .metadata(let fieldID, _) = itemSort,
-           selectedCollection?.metadataFields.contains(where: { $0.id == fieldID }) != true {
-            itemSort = .updatedDescending
-        }
-        isLoading = false
+        do {
+            guard let repository else { return }
+            isLoading = true
+            defer { isLoading = false }
+            collections = try repository.collections()
+            LocalNotificationPreferences.migrateLegacySettings(to: collections.map(\.id))
+            selectedCollection = selectedCollection.flatMap { selected in collections.first(where: { $0.id == selected.id }) } ?? collections.first
+            if case .metadata(let fieldID, _) = itemSort,
+               selectedCollection?.metadataFields.contains(where: { $0.id == fieldID }) != true {
+                itemSort = .updatedDescending
+            }
+            isLoading = false
+
+        } catch { persistenceError = error.localizedDescription }
     }
     func loadSelectedCollection() {
-        guard let repository, let collectionID = selectedCollection?.id else { items = []; webSyncs = []; return }
-        isLoading = true
-        items = repository.items(in: collectionID)
-        reportPersistenceFailure()
-        webSyncs = repository.webSyncs(for: collectionID)
-        isLoading = false
+        do {
+            guard let repository, let collectionID = selectedCollection?.id else { items = []; webSyncs = []; return }
+            isLoading = true
+            defer { isLoading = false }
+            items = try repository.items(in: collectionID)
+            webSyncs = try repository.webSyncs(for: collectionID)
+            isLoading = false
+
+        } catch { persistenceError = error.localizedDescription }
     }
     func loadSelectedCollectionInBackground() async {
-        guard let repository, let backgroundRepository, let collectionID = selectedCollection?.id else { items = []; webSyncs = []; return }
-        isLoading = true
-        let loadedItems = await backgroundRepository.items(in: collectionID)
-        guard selectedCollection?.id == collectionID else { return }
-        if items != loadedItems { items = loadedItems }
-        webSyncs = repository.webSyncs(for: collectionID)
-        isLoading = false
+        do {
+            guard let repository, let backgroundRepository, let collectionID = selectedCollection?.id else { items = []; webSyncs = []; return }
+            isLoading = true
+            defer { isLoading = false }
+            let loadedItems = try await backgroundRepository.items(in: collectionID)
+            guard selectedCollection?.id == collectionID else { return }
+            if items != loadedItems { items = loadedItems }
+            webSyncs = try repository.webSyncs(for: collectionID)
+            isLoading = false
+
+        } catch { persistenceError = error.localizedDescription }
     }
     func select(_ collectionID: UUID?) { guard let collectionID, let collection = collections.first(where: { $0.id == collectionID }), selectedCollection?.id != collectionID else { return }; selectedCollection = collection; selectedState = nil; selectedBrand = nil; itemSort = .updatedDescending; Task { await loadSelectedCollectionInBackground() } }
-    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) { repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); reportPersistenceFailure(); loadCollections(); loadSelectedCollection() }
-    func updateCollection(_ collection: CollectionModel) { repository?.updateCollection(collection); reportPersistenceFailure(); loadCollections(); loadSelectedCollection() }
+    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) {
+        do { try repository?.addCollection(name: name, icon: icon, subtitle: subtitle, category: category); reportPersistenceFailure(); loadCollections(); loadSelectedCollection()
+        } catch { persistenceError = error.localizedDescription }
+    }
+    func updateCollection(_ collection: CollectionModel) {
+        do { try repository?.updateCollection(collection); reportPersistenceFailure(); loadCollections(); loadSelectedCollection()
+        } catch { persistenceError = error.localizedDescription }
+    }
     func addMetadataFields(_ fields: [MetadataFieldDefinition]) {
         guard var collection = selectedCollection, collection.role.canEdit, !fields.isEmpty else { return }
         let existingIDs = Set(collection.metadataFields.map(\.id))
@@ -78,119 +97,169 @@ import SwiftData
         updateCollection(collection)
     }
     func deleteCollection(_ collection: CollectionModel) async {
-        guard collection.role.canDelete, let backgroundRepository else { return }
-        let previousCollections = collections
-        collections.removeAll { $0.id == collection.id }
-        if selectedCollection?.id == collection.id {
-            selectedCollection = collections.first
-            items = []
-            webSyncs = []
-        }
-        await Task.yield()
-        if await backgroundRepository.deleteCollection(id: collection.id) {
-            if selectedCollection != nil { await loadSelectedCollectionInBackground() }
-        } else {
-            collections = previousCollections
-            selectedCollection = collections.first(where: { $0.id == collection.id }) ?? collections.first
-            await loadSelectedCollectionInBackground()
-        }
+        do {
+            guard collection.role.canDelete, let backgroundRepository else { return }
+            let previousCollections = collections
+            collections.removeAll { $0.id == collection.id }
+            if selectedCollection?.id == collection.id {
+                selectedCollection = collections.first
+                items = []
+                webSyncs = []
+            }
+            await Task.yield()
+            if try await backgroundRepository.deleteCollection(id: collection.id) {
+                if selectedCollection != nil { await loadSelectedCollectionInBackground() }
+            } else {
+                collections = previousCollections
+                selectedCollection = collections.first(where: { $0.id == collection.id }) ?? collections.first
+                await loadSelectedCollectionInBackground()
+            }
+
+        } catch { persistenceError = error.localizedDescription; loadCollections(); loadSelectedCollection() }
     }
     /// Adds to `collectionID`, or to the selected collection when it is nil.
     /// Returns nil when the item was rejected as a duplicate or not editable.
     @discardableResult func addItem(title: String, brand: String, variant: String, description: String, state: ItemState, quantity: Int, tags: [String], metadata: [String: MetadataValue] = [:], barcode: Barcode? = nil, imageData: Data? = nil, sourceIdentifier: String? = nil, sourceSnapshot: ProductSourceSnapshot? = nil, allowsDuplicates: Bool = false, collectionID: UUID? = nil) -> CollectionItem? {
-        guard let collectionID = collectionID ?? selectedCollection?.id else { return nil }
-        if let collection = collections.first(where: { $0.id == collectionID }), collection.barcodeRequired, barcode == nil {
-            itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
-            return nil
-        }
-        let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
-        guard repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { reportPersistenceFailure(); return nil }
-        if collectionID == selectedCollection?.id { items.insert(item, at: 0) }
-        indexInSpotlight([item])
-        Task { await syncCollections() }
-        return item
+        do {
+            guard let collectionID = collectionID ?? selectedCollection?.id else { return nil }
+            if let collection = collections.first(where: { $0.id == collectionID }), collection.barcodeRequired, barcode == nil {
+                itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+                return nil
+            }
+            let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
+            guard try repository?.addItem(item, allowsDuplicates: allowsDuplicates) == true else { reportPersistenceFailure(); return nil }
+            if collectionID == selectedCollection?.id { items.insert(item, at: 0) }
+            indexInSpotlight([item])
+            Task { await syncCollections() }
+            return item
+
+        } catch { persistenceError = error.localizedDescription; return nil }
     }
     @discardableResult func bulkUpdateState(for filteredItems: [CollectionItem], to state: ItemState) -> Int {
-        guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
-        guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return 0 }
-        let changed = repository.bulkUpdateState(for: Set(filteredItems.map(\.id)), in: collection.id, to: state)
-        if changed > 0 { loadSelectedCollection() }
-        return changed
+        do {
+            guard let repository, let collection = selectedCollection, collection.role.canEdit, !filteredItems.isEmpty else { return 0 }
+            guard filteredItems.allSatisfy({ $0.collectionID == collection.id }) else { return 0 }
+            let changed = try repository.bulkUpdateState(for: Set(filteredItems.map(\.id)), in: collection.id, to: state)
+            if changed > 0 { loadSelectedCollection() }
+            return changed
+
+        } catch { persistenceError = error.localizedDescription; return 0 }
     }
     func importDrafts(_ drafts: [ImportDraft]) {
-        guard let repository, let collection = selectedCollection else { return }
-        let accepted = drafts.filter { !collection.barcodeRequired || $0.barcode != nil }
-        if accepted.count != drafts.count {
-            itemActionError = "Some imported items were skipped because this collection requires a barcode."
-        }
-        let entries = accepted.map { draft in
-            (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)")
-        }
-        repository.importDrafts(entries, collectionID: collection.id)
-        loadSelectedCollection()
+        do {
+            guard let repository, let collection = selectedCollection else { return }
+            let accepted = drafts.filter { !collection.barcodeRequired || $0.barcode != nil }
+            if accepted.count != drafts.count {
+                itemActionError = "Some imported items were skipped because this collection requires a barcode."
+            }
+            let entries = accepted.map { draft in
+                (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)")
+            }
+            try repository.importDrafts(entries, collectionID: collection.id)
+            loadSelectedCollection()
+
+        } catch { persistenceError = error.localizedDescription }
     }
     func deduplicateItems() -> Int {
-        guard let repository, let collectionID = selectedCollection?.id else { return 0 }
-        let removed = repository.deduplicateItems(in: collectionID)
-        loadSelectedCollection()
-        if removed > 0 { Task { await syncCollections() } }
-        return removed
+        do {
+            guard let repository, let collectionID = selectedCollection?.id else { return 0 }
+            let removed = try repository.deduplicateItems(in: collectionID)
+            loadSelectedCollection()
+            if removed > 0 { Task { await syncCollections() } }
+            return removed
+
+        } catch { persistenceError = error.localizedDescription; return 0 }
     }
     func deduplicateImportedItems() -> Int { deduplicateItems() }
-    func deleteAllImportedItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed }
-    func applyTagRules(_ options: TagGenerationOptions) -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed }
-    func applyMergedTagsToExistingItems() -> Int { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed }
-    func updateItem(_ item: CollectionItem, previousState: ItemState) {
-        if let collection = collections.first(where: { $0.id == item.collectionID }), collection.barcodeRequired, item.barcode == nil {
-            itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
-            return
-        }
-        repository?.updateItem(item, previousState: previousState); reportPersistenceFailure(); guard persistenceError == nil else { return }; replaceItem(item); indexInSpotlight([item])
+    func deleteAllImportedItems() -> Int {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let removed = try repository.deleteAllImportedItems(in: collectionID); loadSelectedCollection(); return removed
+        } catch { persistenceError = error.localizedDescription; return 0 }
     }
-    func setRating(_ value: Int?, for item: CollectionItem) { repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id) }
-    @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? { let comment = repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment }
+    func applyTagRules(_ options: TagGenerationOptions) -> Int {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = try repository.applyTagRules(options, in: collectionID); loadSelectedCollection(); return changed
+        } catch { persistenceError = error.localizedDescription; return 0 }
+    }
+    func applyMergedTagsToExistingItems() -> Int {
+        do { guard let repository, let collectionID = selectedCollection?.id else { return 0 }; let changed = try repository.applyMergedTags(in: collectionID); loadSelectedCollection(); return changed
+        } catch { persistenceError = error.localizedDescription; return 0 }
+    }
+    @discardableResult func updateItem(_ item: CollectionItem, previousState: ItemState) -> Bool {
+        do {
+            if let collection = collections.first(where: { $0.id == item.collectionID }), collection.barcodeRequired, item.barcode == nil {
+                itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+                return false
+            }
+            guard let repository else { return false }; try repository.updateItem(item, previousState: previousState); replaceItem(item); indexInSpotlight([item]); return true
+
+        } catch { persistenceError = error.localizedDescription; return false }
+    }
+    func setRating(_ value: Int?, for item: CollectionItem) {
+        do { try repository?.setRating(for: item, value: value, participant: .current); refreshItem(item.id)
+        } catch { persistenceError = error.localizedDescription }
+    }
+    @discardableResult func addComment(_ text: String, to item: CollectionItem) -> ItemComment? {
+        do { let comment = try repository?.addComment(to: item, text: text, participant: .current); refreshItem(item.id); return comment
+        } catch { persistenceError = error.localizedDescription; return nil }
+    }
     @discardableResult func deleteItem(_ item: CollectionItem) async -> Bool {
-        guard !pendingItemOperations.contains(item.id) else { return false }
-        pendingItemOperations.insert(item.id)
-        let previousIndex = items.firstIndex { $0.id == item.id }
-        items.removeAll { $0.id == item.id }
-        // Let SwiftUI commit the optimistic removal/progress state before the
-        // local SwiftData transaction starts.
-        await Task.yield()
-        let succeeded = await backgroundRepository?.deleteItem(id: item.id, collectionID: item.collectionID) ?? false
-        if succeeded {
-            removeFromSpotlight(itemIDs: [item.id])
-            // Push the tombstone while the app is in the foreground instead of
-            // waiting for the next periodic sync.
-            Task { await syncCollections() }
-        } else {
-            // Put the row back where it was and say so. A silent failure that
-            // looked like a successful delete until the next refresh was the
-            // main reason deleting felt unreliable.
-            items.insert(item, at: min(previousIndex ?? items.count, items.count))
-            itemActionError = "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items."
-        }
-        pendingItemOperations.remove(item.id)
-        return succeeded
+        do {
+            guard !pendingItemOperations.contains(item.id) else { return false }
+            pendingItemOperations.insert(item.id)
+            defer { pendingItemOperations.remove(item.id) }
+            let previousIndex = items.firstIndex { $0.id == item.id }
+            items.removeAll { $0.id == item.id }
+            // Let SwiftUI commit the optimistic removal/progress state before the
+            // local SwiftData transaction starts.
+            await Task.yield()
+            let succeeded = try await backgroundRepository?.deleteItem(id: item.id, collectionID: item.collectionID) ?? false
+            if succeeded {
+                removeFromSpotlight(itemIDs: [item.id])
+                // Push the tombstone while the app is in the foreground instead of
+                // waiting for the next periodic sync.
+                Task { await syncCollections() }
+            } else {
+                // Put the row back where it was and say so. A silent failure that
+                // looked like a successful delete until the next refresh was the
+                // main reason deleting felt unreliable.
+                items.insert(item, at: min(previousIndex ?? items.count, items.count))
+                itemActionError = "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items."
+            }
+            pendingItemOperations.remove(item.id)
+            return succeeded
+
+        } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return false }
     }
     func deleteAllItems() async -> Int {
-        guard let repository, let collectionID = selectedCollection?.id, !isBulkOperationInProgress else { return 0 }
-        isBulkOperationInProgress = true
-        let previousItems = items
-        items = []
-        await Task.yield()
-        let removed = await backgroundRepository?.deleteAllItems(in: collectionID) ?? repository.deleteAllItems(in: collectionID)
-        if removed == 0, !previousItems.isEmpty {
-            loadSelectedCollection()
-            itemActionError = "The items could not be deleted. Only an owner or an editor of this collection can remove items."
-        }
-        isBulkOperationInProgress = false
-        if removed > 0 { Task { await syncCollections() } }
-        return removed
+        do {
+            guard let repository, let collectionID = selectedCollection?.id, !isBulkOperationInProgress else { return 0 }
+            isBulkOperationInProgress = true
+            defer { isBulkOperationInProgress = false }
+            let previousItems = items
+            items = []
+            await Task.yield()
+            let removed = try await backgroundRepository?.deleteAllItems(in: collectionID) ?? repository.deleteAllItems(in: collectionID)
+            if removed == 0, !previousItems.isEmpty {
+                loadSelectedCollection()
+                itemActionError = "The items could not be deleted. Only an owner or an editor of this collection can remove items."
+            }
+            isBulkOperationInProgress = false
+            if removed > 0 { Task { await syncCollections() } }
+            return removed
+
+        } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return 0 }
     }
-    func saveWebSync(_ sync: WebSyncRecord) { repository?.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
-    func updateWebSync(_ sync: WebSyncRecord) { repository?.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
-    func deleteWebSync(_ sync: WebSyncRecord) { repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = repository?.webSyncs(for: id) ?? [] }; scheduleWebSync() }
+    func saveWebSync(_ sync: WebSyncRecord) {
+        do { try repository?.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
+        } catch { persistenceError = error.localizedDescription }
+    }
+    func updateWebSync(_ sync: WebSyncRecord) {
+        do { try repository?.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
+        } catch { persistenceError = error.localizedDescription }
+    }
+    func deleteWebSync(_ sync: WebSyncRecord) {
+        do { try repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
+        } catch { persistenceError = error.localizedDescription }
+    }
     func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? "Sync complete: \(result.added) added, \(result.updated) updated"; scheduleWebSync(); await loadSelectedCollectionInBackground() }
 
     private func scheduleWebSync() {
@@ -198,44 +267,47 @@ import SwiftData
         WebSyncScheduler.schedule(context: modelContext)
     }
     func syncCollections() async {
-        guard let repository, let backgroundRepository else { return }
-        guard CloudKitSharingService.isAvailable else { return }
-        guard syncState != .syncing else {
-            syncRequestedWhileSyncing = true
-            return
-        }
-        syncState = .syncing; syncError = nil
-        let service = CloudKitSharingService()
-        let localCollections = repository.collections()
-        let mutations = repository.pendingMutations().map { CloudSyncMutation(id: $0.id, collectionID: $0.collectionID, itemID: $0.itemID, recordName: $0.recordName, recordType: $0.recordType, operation: $0.operation) }
-        let payload = await backgroundRepository.syncPayload(collectionIDs: localCollections.map(\.id))
-        let mutationIDs = Set(mutations.map(\.id))
         do {
-            let result = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
-            // Remove the mutations that were actually written before merging.
-            // Anything the push skipped stays queued, so the merge still treats
-            // it as a tombstone and a pending delete cannot be resurrected by
-            // the snapshot. The merge may also enqueue recovery mutations for
-            // data previously routed to a participant's private duplicate, and
-            // those must survive for the next shared-zone sync.
-            repository.removeMutations(withIDs: result.appliedMutationIDs)
-            let notificationChanges = repository.merge(result.snapshots)
-            LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
-            if !repository.pendingMutations().isEmpty {
+            guard let repository, let backgroundRepository else { return }
+            guard CloudKitSharingService.isAvailable else { return }
+            guard syncState != .syncing else {
                 syncRequestedWhileSyncing = true
+                return
             }
-            repository.setSyncState(collectionID: selectedCollection?.id ?? localCollections.first?.id ?? UUID(), state: .idle, lastSyncedAt: .now)
-            syncState = .idle; pendingSyncCount = 0; loadCollections(); await loadSelectedCollectionInBackground()
+            syncState = .syncing; syncError = nil
+            let service = CloudKitSharingService()
+            let localCollections = try repository.collections()
+            let mutations = try repository.pendingMutations().map { CloudSyncMutation(id: $0.id, collectionID: $0.collectionID, itemID: $0.itemID, recordName: $0.recordName, recordType: $0.recordType, operation: $0.operation) }
+            let payload = try await backgroundRepository.syncPayload(collectionIDs: localCollections.map(\.id))
+            let mutationIDs = Set(mutations.map(\.id))
+        do {
+                let result = try await service.sync(collections: localCollections, items: payload.items, events: payload.events, mutations: mutations)
+                // Remove the mutations that were actually written before merging.
+                // Anything the push skipped stays queued, so the merge still treats
+                // it as a tombstone and a pending delete cannot be resurrected by
+                // the snapshot. The merge may also enqueue recovery mutations for
+                // data previously routed to a participant's private duplicate, and
+                // those must survive for the next shared-zone sync.
+                try repository.removeMutations(withIDs: result.appliedMutationIDs)
+                let notificationChanges = try repository.merge(result.snapshots)
+                LocalNotificationService.shared.scheduleSharedChanges(notificationChanges)
+                if try repository.pendingMutations().isEmpty == false {
+                    syncRequestedWhileSyncing = true
+                }
+                try repository.setSyncState(collectionID: selectedCollection?.id ?? localCollections.first?.id ?? UUID(), state: .idle, lastSyncedAt: .now)
+                syncState = .idle; pendingSyncCount = 0; loadCollections(); await loadSelectedCollectionInBackground()
         } catch {
             syncState = .error; syncError = error.localizedDescription
-            repository.markMutations(withIDs: mutationIDs, error: error)
-            pendingSyncCount = repository.pendingMutations().count
-            if let collectionID = selectedCollection?.id { repository.setSyncState(collectionID: collectionID, state: .error, error: error.localizedDescription) }
+            try repository.markMutations(withIDs: mutationIDs, error: error)
+            pendingSyncCount = try repository.pendingMutations().count
+            if let collectionID = selectedCollection?.id { try repository.setSyncState(collectionID: collectionID, state: .error, error: error.localizedDescription) }
         }
         if syncRequestedWhileSyncing {
             syncRequestedWhileSyncing = false
             await syncCollections()
         }
+
+        } catch { persistenceError = error.localizedDescription }
     }
     func acceptShare(from url: URL) async { do { try await CloudKitSharingService().acceptShare(from: url); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
     func acceptShare(metadata: CKShare.Metadata) async { do { try await CloudKitSharingService().acceptShare(metadata: metadata); await syncCollections() } catch { syncState = .error; syncError = error.localizedDescription } }
@@ -249,28 +321,37 @@ import SwiftData
     }
     /// Items across every collection, not only the one on screen.
     func intentItems() -> [CollectionItem] {
-        guard let repository else { return [] }
-        return intentCollections().flatMap { repository.items(in: $0.id) }
+        do {
+            guard let repository else { return [] }
+            return try intentCollections().flatMap { try repository.items(in: $0.id) }
+
+        } catch { persistenceError = error.localizedDescription; return [] }
     }
-    func item(id: UUID) -> CollectionItem? { repository?.item(id: id) }
+    func item(id: UUID) -> CollectionItem? {
+        do { return try repository?.item(id: id)
+        } catch { persistenceError = error.localizedDescription; return nil }
+    }
     /// Moves items in any collection to `state`, skipping collections that
     /// cannot be edited or do not define that status. Returns the changed
     /// items as they were before, so the change can be undone.
     @discardableResult func setState(_ state: ItemState, forItemIDs itemIDs: some Sequence<UUID>) -> [CollectionItem] {
-        guard let repository else { return [] }
-        let collectionsByID = Dictionary(uniqueKeysWithValues: intentCollections().map { ($0.id, $0) })
-        let targets = Set(itemIDs).compactMap { repository.item(id: $0) }.filter { $0.state != state }
-        var changed: [CollectionItem] = []
-        for (collectionID, group) in Dictionary(grouping: targets, by: \.collectionID) {
-            guard let collection = collectionsByID[collectionID], collection.role.canEdit,
-                  collection.statuses.contains(where: { $0.id == state.rawValue }) else { continue }
-            if repository.bulkUpdateState(for: Set(group.map(\.id)), in: collectionID, to: state) > 0 { changed += group }
-        }
-        guard !changed.isEmpty else { return [] }
-        loadSelectedCollection()
-        indexInSpotlight(changed.compactMap { repository.item(id: $0.id) })
-        Task { await syncCollections() }
-        return changed
+        do {
+            guard let repository else { return [] }
+            let collectionsByID = Dictionary(uniqueKeysWithValues: intentCollections().map { ($0.id, $0) })
+            let targets = try Set(itemIDs).compactMap { try repository.item(id: $0) }.filter { $0.state != state }
+            var changed: [CollectionItem] = []
+            for (collectionID, group) in Dictionary(grouping: targets, by: \.collectionID) {
+                guard let collection = collectionsByID[collectionID], collection.role.canEdit,
+                      collection.statuses.contains(where: { $0.id == state.rawValue }) else { continue }
+                if try repository.bulkUpdateState(for: Set(group.map(\.id)), in: collectionID, to: state) > 0 { changed += group }
+            }
+            guard !changed.isEmpty else { return [] }
+            loadSelectedCollection()
+            indexInSpotlight(try changed.compactMap { try repository.item(id: $0.id) })
+            Task { await syncCollections() }
+            return changed
+
+        } catch { persistenceError = error.localizedDescription; return [] }
     }
     /// Puts items back to the statuses captured in `snapshot`.
     func restoreStates(_ snapshot: [CollectionItem]) {
@@ -298,31 +379,35 @@ import SwiftData
     func status(for state: ItemState, in collection: CollectionModel? = nil) -> CollectionStatus { (collection ?? selectedCollection)?.status(for: state) ?? CollectionStatus.fallback(for: state) }
     func barcodeStatus(_ barcode: Barcode) -> ItemState? { items.first(where: { $0.barcode == barcode })?.state }
     func productMatches(for barcode: Barcode, productName: String? = nil) -> [CollectionProductMatch] {
-        guard let repository else { return [] }
-        let collectionNames = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0.name) })
-        let normalizedName = productName.map(Self.normalizedText)
-        let nameWords = normalizedName.map(Self.words) ?? []
-        return collections.flatMap { collection in
-            repository.items(in: collection.id).compactMap { item in
-                var matchedBy: [String] = []
-                if item.barcode == barcode { matchedBy.append("Barcode") }
-                if let normalizedName, !normalizedName.isEmpty {
-                    let itemWords = Self.words(item.title)
-                    if Self.normalizedText(item.title) == normalizedName || nameWords.isSubset(of: itemWords) {
-                        matchedBy.append("Name")
+        do {
+            guard let repository else { return [] }
+            let collectionNames = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0.name) })
+            let normalizedName = productName.map(Self.normalizedText)
+            let nameWords = normalizedName.map(Self.words) ?? []
+            return try collections.flatMap { collection in
+                try repository.items(in: collection.id).compactMap { item in
+                    var matchedBy: [String] = []
+                    if item.barcode == barcode { matchedBy.append("Barcode") }
+                    if let normalizedName, !normalizedName.isEmpty {
+                        let itemWords = Self.words(item.title)
+                        if Self.normalizedText(item.title) == normalizedName || nameWords.isSubset(of: itemWords) {
+                            matchedBy.append("Name")
+                        }
+                        let normalizedTags = item.tags.map(Self.normalizedText)
+                        let tagWords = Set(normalizedTags.flatMap(Self.words))
+                        if normalizedTags.contains(normalizedName) || nameWords.isSubset(of: tagWords) {
+                            matchedBy.append("Tags")
+                        }
                     }
-                    let normalizedTags = item.tags.map(Self.normalizedText)
-                    let tagWords = Set(normalizedTags.flatMap(Self.words))
-                    if normalizedTags.contains(normalizedName) || nameWords.isSubset(of: tagWords) {
-                        matchedBy.append("Tags")
-                    }
+                    guard !matchedBy.isEmpty else { return nil }
+                    return CollectionProductMatch(id: item.id, collectionName: collectionNames[item.collectionID] ?? collection.name, itemTitle: item.title, state: item.state, status: collection.status(for: item.state), matchedBy: matchedBy)
                 }
-                guard !matchedBy.isEmpty else { return nil }
-                return CollectionProductMatch(id: item.id, collectionName: collectionNames[item.collectionID] ?? collection.name, itemTitle: item.title, state: item.state, status: collection.status(for: item.state), matchedBy: matchedBy)
             }
-        }
+
+        } catch { persistenceError = error.localizedDescription; return [] }
     }
     private func rebuildDerivedItemState() {
+        searchIndex.rebuild(items: items)
         brands = Array(Set(items.lazy.map(\.brand).filter { !$0.isEmpty })).sorted()
         hasDateTags = items.contains { !$0.dateTags.isEmpty }
         var stored = 0, consumed = 0, wanted = 0
@@ -339,12 +424,11 @@ import SwiftData
         persistenceError = repository?.lastPersistenceError?.localizedDescription
     }
     private func rebuildVisibleItems() {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = ItemSearchIndex.normalizedQuery(searchText)
         let filtered = items.filter { item in
             guard selectedState == nil || item.state == selectedState, selectedBrand == nil || item.brand == selectedBrand else { return false }
             guard !query.isEmpty else { return true }
-            let haystack = ([item.title, item.brand, item.variant, item.itemDescription, item.barcode?.value ?? ""] + item.tags + item.metadata.values.map(\.displayValue)).joined(separator: " ").lowercased()
-            return haystack.contains(query)
+            return searchIndex.matches(itemID: item.id, normalizedQuery: query)
         }
         switch itemSort {
         case .updatedDescending: visibleItems = filtered.sorted { $0.updatedAt > $1.updatedAt }
@@ -363,9 +447,12 @@ import SwiftData
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = item }
     }
     private func refreshItem(_ itemID: UUID) {
-        guard let repository, let collectionID = selectedCollection?.id,
-              let refreshed = repository.item(id: itemID, in: collectionID) else { return }
-        replaceItem(refreshed)
+        do {
+            guard let repository, let collectionID = selectedCollection?.id,
+                  let refreshed = try repository.item(id: itemID, in: collectionID) else { return }
+            replaceItem(refreshed)
+
+        } catch { persistenceError = error.localizedDescription }
     }
     private func dateSorts(_ lhs: CollectionItem, before rhs: CollectionItem, ascending: Bool) -> Bool {
         switch (lhs.earliestDateTag, rhs.earliestDateTag) {

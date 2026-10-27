@@ -1,4 +1,5 @@
 import XCTest
+@testable import CollectionManager
 
 final class CollectionManagerTests: XCTestCase {
     func testBarcodeNormalizationAndCheckDigit() {

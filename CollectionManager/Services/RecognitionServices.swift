@@ -70,28 +70,48 @@ enum GamesEANAPIKeyStore {
     private static let service = "CollectionManager.GamesEAN"
     private static let account = "api-key"
 
-    static func load() -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+    enum StorageError: LocalizedError {
+        case unavailable
+        var errorDescription: String? { "The API key could not be accessed in Keychain. Unlock your device and try again." }
     }
 
-    static func save(_ value: String) {
-        let data = Data(value.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
+    static func load() throws -> String {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return "" }
+        guard status == errSecSuccess, let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else { throw StorageError.unavailable }
+        return value
+    }
+
+    static func isValid(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 4096 && value.utf8.allSatisfy { (33...126).contains($0) }
+    }
+
+    static func save(_ value: String) throws {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty || isValid(value) else { throw ProductLookupError.invalidAPIKey }
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            SecItemDelete(query as CFDictionary)
-        } else if SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary) != errSecSuccess {
-            var item = query
-            item[kSecValueData as String] = data
-            SecItemAdd(item as CFDictionary, nil)
+        if value.isEmpty {
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw StorageError.unavailable }
+        } else {
+            let data = Data(value.utf8)
+            let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+            if status == errSecItemNotFound {
+                var item = query
+                item[kSecValueData as String] = data
+                item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { throw StorageError.unavailable }
+            } else if status != errSecSuccess { throw StorageError.unavailable }
         }
     }
 }
 
 enum ProductLookupError: LocalizedError, Sendable {
     case missingAPIKey
+    case invalidAPIKey
     case unauthorized
     case invalidResponse
     case rateLimited
@@ -100,6 +120,7 @@ enum ProductLookupError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidAPIKey: "The API key contains unsupported characters. Paste the key again in Settings."
         case .missingAPIKey: "Add the Games EAN API key in Settings before looking up games."
         case .unauthorized: "The Games EAN API key was rejected. Check the key in Settings."
         case .invalidResponse: "The product service returned an invalid response."
@@ -508,16 +529,31 @@ struct GamesEANProvider: ProductMetadataProvider {
         }
     }
 
-    private var apiKey: String = "3rMe42DBVCyW1WhX5YIXrQuiHzfev3NhybdUzOve6WlhtROetkcmdHkDa35PpZaWPL74Z9gwE5nkDIz1JVP5rYZ1GErZtY18ZYBv"
+    private let credential: @Sendable () throws -> String
+    private let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let baseURL = URL(string: "https://levelcomplete.de/api/v3a/")!
 
-    init(apiKey: String? = nil) {
-        let configuredKey = GamesEANAPIKeyStore.load()
-        self.apiKey = apiKey ?? (configuredKey.isEmpty ? "3rMe42DBVCyW1WhX5YIXrQuiHzfev3NhybdUzOve6WlhtROetkcmdHkDa35PpZaWPL74Z9gwE5nkDIz1JVP5rYZ1GErZtY18ZYBv" : configuredKey)
+    init(
+        apiKey: String? = nil,
+        transport: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse) = GamesEANProvider.send
+    ) {
+        self.credential = { try apiKey ?? GamesEANAPIKeyStore.load() }
+        self.transport = transport
+    }
+
+    private static func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        // Credentials are headers only and must not be persisted in a response cache.
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        return try await session.data(for: request)
     }
 
     func product(for barcode: Barcode) async throws -> ProductMetadata? {
+        let apiKey = try credential().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty else { throw ProductLookupError.missingAPIKey }
+        guard GamesEANAPIKeyStore.isValid(apiKey) else { throw ProductLookupError.invalidAPIKey }
         let lookupValues = barcode.value.hasPrefix("0") ? [barcode.value, String(barcode.value.dropFirst())] : [barcode.value]
         var game: Game?
         for lookupValue in lookupValues {
@@ -525,12 +561,22 @@ struct GamesEANProvider: ProductMetadataProvider {
             var request = URLRequest(url: endpoint, timeoutInterval: 15)
             request.setValue(apiKey, forHTTPHeaderField: "Apikey")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let data: Data
+            let response: URLResponse
+            do { (data, response) = try await transport(request) }
+            catch is CancellationError { throw CancellationError() }
+            catch let error as URLError {
+                if error.code == .cancelled { throw CancellationError() }
+                throw ProductLookupError.network(error.code)
+            }
+            catch { throw ProductLookupError.serviceUnavailable }
             guard let http = response as? HTTPURLResponse else { throw ProductLookupError.invalidResponse }
             if http.statusCode == 401 || http.statusCode == 403 { throw ProductLookupError.unauthorized }
             if http.statusCode == 429 { throw ProductLookupError.rateLimited }
             guard (200..<300).contains(http.statusCode) else { throw ProductLookupError.serviceUnavailable }
-            let games = try JSONDecoder().decode([Game].self, from: data)
+            let games: [Game]
+            do { games = try JSONDecoder().decode([Game].self, from: data) }
+            catch { throw ProductLookupError.invalidResponse }
             if let first = games.first { game = first; break }
         }
         guard let game, let title = game.name, !title.isEmpty else { return nil }

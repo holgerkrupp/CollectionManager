@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
     @AppStorage(AppTips.resetRequestKey) private var tipsResetRequested = false
     @State private var gamesEANAPIKey = ""
+    @State private var credentialMessage: String?
     @State private var showingDeduplicationConfirmation = false
     @State private var showingOnboarding = false
     @State private var deduplicationMessage: String?
@@ -22,8 +23,23 @@ struct SettingsView: View {
 
                 Section("Games EAN lookup") {
                     SecureField("API key", text: $gamesEANAPIKey)
-                        .onChange(of: gamesEANAPIKey) { _, newValue in GamesEANAPIKeyStore.save(newValue) }
-                    Text("Uses your Games EAN API for video-game metadata. The configured key is stored in Keychain; the app also retains the built-in API configuration for this controlled service.")
+                    Button("Save API key") {
+                        do {
+                            try GamesEANAPIKeyStore.save(gamesEANAPIKey)
+                            gamesEANAPIKey = ""
+                            credentialMessage = "API key saved in Keychain."
+                        } catch { credentialMessage = error.localizedDescription }
+                    }
+                    .disabled(gamesEANAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Remove API key", role: .destructive) {
+                        do {
+                            try GamesEANAPIKeyStore.save("")
+                            gamesEANAPIKey = ""
+                            credentialMessage = "API key removed. Game lookup requires your own key."
+                        } catch { credentialMessage = error.localizedDescription }
+                    }
+                    if let credentialMessage { Text(credentialMessage).font(.footnote) }
+                    Text("Games EAN lookup requires your own API key. Save it in this device’s Keychain; no built-in key is supplied. Only the barcode and authentication header are sent to levelcomplete.de. You can add games manually without a key.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -91,9 +107,6 @@ struct SettingsView: View {
                     onboardingCompleted = true
                     showingOnboarding = false
                 }
-            }
-            .task {
-                gamesEANAPIKey = GamesEANAPIKeyStore.load()
             }
             .confirmationDialog("Remove duplicate items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
                 Button("Remove Duplicates", role: .destructive) {

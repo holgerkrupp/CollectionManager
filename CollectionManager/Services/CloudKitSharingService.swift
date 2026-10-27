@@ -86,6 +86,11 @@ final class CloudKitSharingService {
     init(container: CKContainer? = nil) { injectedContainer = container }
 
     static var isAvailable: Bool {
+        #if DEBUG
+        if NSClassFromString("XCTestCase") != nil || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+           ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil ||
+           ProcessInfo.processInfo.arguments.contains("--ui-testing") { return false }
+        #endif
         #if targetEnvironment(simulator)
         // The CLI simulator build is intentionally unsigned, so CloudKit would
         // abort inside CKContainer instead of returning an ordinary error.

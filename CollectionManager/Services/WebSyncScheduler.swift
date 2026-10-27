@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 #if os(iOS)
 import BackgroundTasks
 #endif
@@ -12,7 +13,9 @@ enum WebSyncScheduler {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
             let work = Task { @MainActor in
                 let context = ModelContext(container)
-                let configs = enabledSyncs(in: context).filter { isDue($0) }
+                let configs: [WebSyncRecord]
+                do { configs = try enabledSyncs(in: context).filter { isDue($0) } }
+                catch { task.setTaskCompleted(success: false); return }
                 var success = !Task.isCancelled
 
                 for config in configs where !Task.isCancelled {
@@ -37,7 +40,12 @@ enum WebSyncScheduler {
     /// actual launch time, so `earliestBeginDate` is deliberately a lower bound.
     @MainActor static func schedule(context: ModelContext) {
         #if os(iOS)
-        let syncs = enabledSyncs(in: context)
+        let syncs: [WebSyncRecord]
+        do { syncs = try enabledSyncs(in: context) }
+        catch {
+            Logger(subsystem: "de.holgerkrupp.CollectionManager", category: "web-sync").error("Could not read background sync configuration")
+            return
+        }
         guard let nextDate = syncs.map({ nextDueDate(for: $0) }).min() else {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
             return
@@ -57,8 +65,8 @@ enum WebSyncScheduler {
         #endif
     }
 
-    @MainActor private static func enabledSyncs(in context: ModelContext) -> [WebSyncRecord] {
-        (try? context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.enabled }))) ?? []
+    @MainActor private static func enabledSyncs(in context: ModelContext) throws -> [WebSyncRecord] {
+        try context.fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.enabled }))
     }
 
     private static func isDue(_ sync: WebSyncRecord, now: Date = .now) -> Bool {

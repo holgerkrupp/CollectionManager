@@ -28,7 +28,7 @@ struct CollectionDetailView: View {
             .onSubmit(of: .search) { AppTips.listFiltered.sendDonation() }
             .task(id: store.items.count) { TableLayoutTip.itemCount = store.items.count }
             .onChange(of: prefersTableLayout, initial: true) { _, usesTable in if usesTable { tableLayoutTip.invalidate(reason: .actionPerformed) } }
-            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if horizontalSizeClass == .regular { layoutPicker }; moreMenu; Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent).help("Add a new item to this collection") } }
+            .toolbar { ToolbarItemGroup(placement: .platformTrailing) { if supportsTableLayout { layoutPicker }; moreMenu; Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }.buttonStyle(.borderedProminent).help("Add a new item to this collection") } }
             .sheet(isPresented: $showingAddItem) { AddItemView() }
             .sheet(item: $store.openedItem) { EditItemView(item: $0) }
             .appEntityIdentifier(store.selectedCollection.map { EntityIdentifier(for: CollectionEntity.self, identifier: $0.id) })
@@ -124,10 +124,17 @@ struct CollectionDetailView: View {
 
     // The spreadsheet layout needs the full width of a regular size class to
     // be useful, so compact layouts (iPhone, slide over) keep the card list.
-    private var showsTableLayout: Bool { horizontalSizeClass == .regular && prefersTableLayout }
+    private var supportsTableLayout: Bool {
+        #if os(macOS)
+        true
+        #else
+        horizontalSizeClass == .regular
+        #endif
+    }
+    private var showsTableLayout: Bool { supportsTableLayout && prefersTableLayout }
 
     private var cardLayout: some View {
-        ScrollView { VStack(alignment: .leading, spacing: 20) { header; syncBanner; stats; filterBar; progressBanners; LazyVStack(spacing: 12) { ForEach(store.visibleItems) { ItemCard(item: $0) } } }.padding(.horizontal).padding(.bottom, 24) }
+        ScrollView { VStack(alignment: .leading, spacing: 20) { header; syncBanner; pendingEditsBanner; stats; filterBar; progressBanners; LazyVStack(spacing: 12) { ForEach(store.visibleItems) { ItemCard(item: $0) } } }.padding(.horizontal).padding(.bottom, 24) }
     }
 
     private var tableLayout: some View {
@@ -137,10 +144,37 @@ struct CollectionDetailView: View {
             // its intrinsic height or it competes with the table for space.
             filterBar.fixedSize(horizontal: false, vertical: true)
             progressBanners
-            CollectionTableView()
+            if let collection = store.selectedCollection {
+                CollectionTableView(editSession: store.editSessions.session(for: collection.id))
+            }
         }
         .padding(.horizontal)
         .padding(.bottom, 16)
+    }
+
+    @ViewBuilder private var pendingEditsBanner: some View {
+        if let collection = store.selectedCollection {
+            let session = store.editSessions.session(for: collection.id)
+            if session.hasChanges {
+                HStack {
+                    Label("Unsaved table edits", systemImage: "pencil.circle")
+                    Spacer()
+                    Button("Revert") { session.revert() }
+                    Button("Save") {
+                        if session.save(originals: store.items, canEdit: collection.role.canEdit, persist: {
+                            store.updateItem($0, previousState: $1)
+                        }) {
+                            session.saveNewItem { title in
+                                store.addItem(title: title, brand: "", variant: "", description: "",
+                                              state: ItemState(rawValue: collection.defaultStatusID), quantity: 1, tags: []) != nil
+                            }
+                        }
+                    }
+                    .disabled(!collection.role.canEdit)
+                }
+                .font(.subheadline)
+            }
+        }
     }
 
     @ViewBuilder private var progressBanners: some View {

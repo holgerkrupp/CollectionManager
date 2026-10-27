@@ -2,9 +2,10 @@ import Foundation
 
 /// Deterministic data sizes used for Instruments and XCTest performance runs.
 /// The fixture intentionally omits full-resolution images by default; callers
-/// can opt into bounded thumbnails when measuring image memory behavior.
+/// can opt into placeholder image bytes for allocation experiments. These bytes
+/// are not an encoded image and cannot establish real image decode/scroll costs.
 enum CollectionPerformanceFixture {
-    static let sizes = [1_000, 10_000, 25_000]
+    static let sizes = [1_000, 10_000, 50_000]
 
     static func items(count: Int, collectionID: UUID = UUID(), includeThumbnails: Bool = false) -> [CollectionItem] {
         let states = ItemState.allCases

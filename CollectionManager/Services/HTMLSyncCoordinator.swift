@@ -26,8 +26,8 @@ struct WebSyncResult: Sendable {
         do {
             let tables = try await HTMLImporter().load(url: url)
             guard let table = tables.first(where: { $0.name == configuration.tableName }) ?? tables.first else { throw HTMLImportError.noObjects }
-            let metadataFields = repository.metadataFields(for: configuration.collectionID)
-            let validStatusIDs = Set(repository.statuses(for: configuration.collectionID).map(\.id))
+            let metadataFields = try repository.metadataFields(for: configuration.collectionID)
+            let validStatusIDs = Set(try repository.statuses(for: configuration.collectionID).map(\.id))
             let mapping: [ImportColumnDestination]
             if configuration.mapping.count == table.headers.count {
                 mapping = configuration.mapping
@@ -44,7 +44,7 @@ struct WebSyncResult: Sendable {
                 updated.tags = TagUtilities.tags(title: draft.title, existing: draft.tags, rawTags: draft.tags.joined(separator: ","), options: configuration.tagOptions)
                 return updated
             }
-            let existingSourceKeys = repository.importedSourceKeys(in: configuration.collectionID)
+            let existingSourceKeys = try repository.importedSourceKeys(in: configuration.collectionID)
             var entries: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)] = []
             for draft in drafts {
                 let key = sourceKey(configuration, draft: draft)
@@ -53,11 +53,16 @@ struct WebSyncResult: Sendable {
                 if !configuration.addNewItems && !existingSourceKeys.contains(key.lowercased()) { continue }
                 entries.append((effectiveDraft, key, configuration.updateExistingStates))
             }
-            let counts = repository.applyWebDrafts(entries, collectionID: configuration.collectionID)
-            let result = WebSyncResult(added: counts.added, updated: counts.updated, collectionID: configuration.collectionID, collectionName: repository.collectionName(for: configuration.collectionID), addedItems: counts.addedItems, matchedStateChanges: counts.matchedStateChanges)
-            repository.setWebSync(configuration, lastSyncAt: .now, error: nil)
+            let counts = try repository.applyWebDrafts(entries, collectionID: configuration.collectionID)
+            let result = WebSyncResult(added: counts.added, updated: counts.updated, collectionID: configuration.collectionID, collectionName: try repository.collectionName(for: configuration.collectionID), addedItems: counts.addedItems, matchedStateChanges: counts.matchedStateChanges)
+            try repository.setWebSync(configuration, lastSyncAt: .now, error: nil)
             return result
-        } catch { repository.setWebSync(configuration, lastSyncAt: configuration.lastSyncAt, error: error.localizedDescription); return WebSyncResult(error: error.localizedDescription) }
+        } catch {
+            let failure = error.localizedDescription
+            do { try repository.setWebSync(configuration, lastSyncAt: configuration.lastSyncAt, error: failure) }
+            catch { return WebSyncResult(error: "The web update failed and its status could not be saved. " + error.localizedDescription) }
+            return WebSyncResult(error: failure)
+        }
     }
     private func sourceKey(_ configuration: WebSyncRecord, draft: ImportDraft) -> String { let raw = draft.sourceIdentifier?.isEmpty == false ? draft.sourceIdentifier! : "\(draft.title)|\(draft.brand)|\(draft.variant)"; return "\(configuration.id.uuidString)|\(raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))" }
 }
