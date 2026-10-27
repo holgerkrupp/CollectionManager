@@ -1,19 +1,19 @@
 import Foundation
 
-enum TitleTagMode: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum TitleTagMode: String, CaseIterable, Identifiable, Sendable {
     case firstSegment
     case everyWord
 
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .firstSegment: "First title segment"
-        case .everyWord: "Every title word"
+        case .firstSegment: String(localized: "First title segment")
+        case .everyWord: String(localized: "Every title word")
         }
     }
 }
 
-struct TagGenerationOptions: Sendable {
+nonisolated struct TagGenerationOptions: Sendable, Equatable {
     var separators = ",|;/"
     var splitOnWhitespace = false
     var generateFromTitle = false
@@ -22,7 +22,7 @@ struct TagGenerationOptions: Sendable {
     var keepExistingTags = true
 }
 
-enum TagUtilities {
+nonisolated enum TagUtilities {
     private static let dateFormats = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "dd-MM-yyyy", "dd/MM/yyyy", "dd.MM.yyyy", "MM-dd-yyyy", "MM/dd/yyyy", "MM.dd.yyyy", "yyyyMMdd"]
 
     static func dateValue(for tag: String) -> Date? {

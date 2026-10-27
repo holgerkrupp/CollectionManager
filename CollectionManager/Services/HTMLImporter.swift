@@ -1,16 +1,16 @@
 import Foundation
 
-enum HTMLImportField: String, CaseIterable, Codable, Identifiable, Sendable {
+nonisolated enum HTMLImportField: String, CaseIterable, Codable, Identifiable, Sendable {
     case title, brand, variant, description, state, quantity, barcode, tags, ignore
     var id: String { rawValue }
-    var label: String { switch self { case .title: "Title"; case .brand: "Brand"; case .variant: "Variant"; case .description: "Description"; case .state: "State"; case .quantity: "Quantity"; case .barcode: "Barcode"; case .tags: "Tags"; case .ignore: "Ignore" } }
+    var label: String { switch self { case .title: String(localized: "Title"); case .brand: String(localized: "Brand"); case .variant: String(localized: "Variant"); case .description: String(localized: "Description"); case .state: String(localized: "State"); case .quantity: String(localized: "Quantity"); case .barcode: String(localized: "Barcode"); case .tags: String(localized: "Tags"); case .ignore: String(localized: "Ignore") } }
 }
 
-struct HTMLImportTable: Identifiable, Sendable {
+nonisolated struct HTMLImportTable: Identifiable, Sendable {
     let id = UUID(); var name: String; var headers: [String]; var rows: [[String]]
 }
 
-struct HTMLImporter {
+nonisolated struct HTMLImporter {
     func load(url: URL) async throws -> [HTMLImportTable] {
         let (data, response) = try await URLSession.shared.data(from: url)
         guard (response as? HTTPURLResponse)?.statusCode ?? 200 < 400 else { throw URLError(.badServerResponse) }
@@ -130,4 +130,4 @@ struct HTMLImporter {
     private func clean(_ value: String) -> String { var value = value.replacingOccurrences(of: #"(?is)<[^>]+>"#, with: "", options: .regularExpression); let entities = ["&amp;": "&", "&quot;": "\"", "&#39;": "'", "&lt;": "<", "&gt;": ">", "&nbsp;": " "]; for (entity, replacement) in entities { value = value.replacingOccurrences(of: entity, with: replacement) }; return value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
-enum HTMLImportError: LocalizedError { case noObjects; var errorDescription: String? { "No importable tables or repeated linked objects were found in this HTML." } }
+enum HTMLImportError: LocalizedError { case noObjects; var errorDescription: String? { String(localized: "No importable tables or repeated linked objects were found in this HTML.") } }

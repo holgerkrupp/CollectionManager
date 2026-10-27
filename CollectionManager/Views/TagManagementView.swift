@@ -77,7 +77,7 @@ struct TagManagementView: View {
                             resultMessage = String(localized: "Tags could not be updated. Your options are still here; retry after resolving the library error.")
                             return
                         }
-                        resultMessage = count == 0 ? String(localized: "No items needed tag changes.") : "Updated tags for \(count) item\(count == 1 ? "" : "s")."
+                        resultMessage = count == 0 ? String(localized: "No items needed tag changes.") : String(localized: "Items with updated tags: \(count)")
                     }
                     .disabled(mergedTagsNeedSave)
                 }
@@ -134,6 +134,6 @@ struct TagManagementView: View {
             return
         }
         mergedTagsNeedApply = false
-        resultMessage = count == 0 ? String(localized: "Merged tag rules saved. No existing items needed changes.") : "Applied merged tags to \(count) existing items."
+        resultMessage = count == 0 ? String(localized: "Merged tag rules saved. No existing items needed changes.") : String(localized: "Merged tags applied to items: \(count)")
     }
 }

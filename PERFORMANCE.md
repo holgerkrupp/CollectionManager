@@ -171,3 +171,41 @@ changes rebuild search text; collection selection clears the prior visible scope
 Seven query tests cover parity, captured numeric locale and cancellation. The
 measurements above remain host data-path evidence; moving work off the main actor
 does not itself establish measured frame latency or image-heavy device memory.
+
+## Final locale and preparation regression
+
+After locale-aware metadata formatting and canonical numeric search were added,
+a matching Debug 50k host run measured index build 83.44 ms, indexed search median
+91.94 ms, uncached text search 161.75 ms, fetch/decode 1735.72 ms and store seed
+3905.99 ms. These are phase timings from `localized-frozen-unit.log`, not device
+UI-frame acceptance. Index/brand/date/stat preparation and table sorting now run
+in cancellable detached tasks. Item/locale and query generation checks prevent an
+older result from replacing a new selection or query. Captured locales format
+values while canonical numeric spellings remain searchable.
+
+## Full CSV import measurements
+
+The real parser, mapping and atomic repository/event/outbox path was measured in
+Debug on the same host, without a network transport. All rows and corresponding
+events/outgoing intents were verified after saving. These are single host samples.
+
+| Imported items | Before captured-settings preflight | After |
+| --- | ---: | ---: |
+| 1,000 | 368.26 ms | 333.05 ms |
+| 10,000 | 4.040 s | 3.585 s |
+| 50,000 | 22.807 s | 19.883 s |
+
+For 50k, atomic repository work fell from 21.990 s to 19.039 s after removing a
+repeated collection fetch from every item's validation. The original parse and
+mapping phases measured 140.60 ms and 676.44 ms. The benchmark intentionally calls
+the core directly to measure these phases; the app now prepares mappings/review
+on cancellable workers and imports through a dedicated context actor. Progress
+keeps the review open until the transaction succeeds; failure retains selection.
+A background queue does not prove frame latency. Physical-device full imports,
+peak memory and actual sync upload measurements remain release gates.
+
+A later complete 144-test Debug run including the revision fence measured full
+imports at 308.16 ms / 3.524 s / 20.545 s for 1k / 10k / 50k respectively
+(`complete-final-unit.log`). Its 50k atomic phase was 19.723 s. These repeated
+samples show host variance; use roughly 20–21 seconds for the current 50k path,
+not a claimed device latency bound.

@@ -22,8 +22,12 @@ final class CloudShareAppDelegate: NSObject, UIApplicationDelegate {
         CloudShareInvitationInbox.shared.receive(metadata)
     }
 
-    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        NotificationCenter.default.post(name: .collectionManagerCloudKitDidChange, object: nil)
+    nonisolated func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        // UIKit's payload is not Sendable. Keep it on the caller's executor;
+        // only the payload-free refresh signal crosses to the UI actor.
+        await MainActor.run {
+            NotificationCenter.default.post(name: .collectionManagerCloudKitDidChange, object: nil)
+        }
         return .newData
     }
 }
@@ -109,6 +113,20 @@ extension Notification.Name {
     }
 }
 
+private struct IsolatedTestLayout: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing"), ProcessInfo.processInfo.arguments.contains("--ui-testing-rtl-large-text") {
+            content.environment(\.layoutDirection, .rightToLeft)
+                .environment(\.dynamicTypeSize, .accessibility5)
+                .environment(\.locale, Locale(identifier: "ar"))
+        } else { content }
+        #else
+        content
+        #endif
+    }
+}
+
 @main struct CollectionManagerApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
@@ -153,6 +171,7 @@ extension Notification.Name {
                 if let container {
                     RootView()
                         .environment(appStore)
+                        .modifier(IsolatedTestLayout())
                         .task(id: scenePhase) {
                             guard scenePhase == .active else { return }
                             if Self.isRunningTests { store.load(); return }

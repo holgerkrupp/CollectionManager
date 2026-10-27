@@ -40,12 +40,12 @@ enum LocalNotificationPreferences {
     }
 }
 
-struct AutomaticSyncStateChange: Sendable {
+nonisolated struct AutomaticSyncStateChange: Sendable {
     let title: String
     let newState: ItemState
 }
 
-struct SharedCollectionItemChange: Sendable {
+nonisolated struct SharedCollectionItemChange: Sendable {
     enum Kind: Sendable {
         case added
         case removed
@@ -57,7 +57,7 @@ struct SharedCollectionItemChange: Sendable {
     let kind: Kind
 }
 
-struct CloudMergeNotificationChanges: Sendable {
+nonisolated struct CloudMergeNotificationChanges: Sendable {
     var sharedItemChanges: [SharedCollectionItemChange] = []
 }
 

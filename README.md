@@ -55,7 +55,7 @@ hosted-Xcode blockers. A failing CI toolchain check is not a passing build.
   UICloudSharingController and macOS CloudKit management. Current CKShare state
   supplies owner/editor/viewer authority. Viewers cannot write ratings/comments
   because those are CloudKit writes too. A network failure does not delete data.
-- `ItemQueryProcessor` prepares cancellable search/filter/sort results off the
+- `ItemDerivedState` and `ItemQueryProcessor` prepare cancellable indexes, summary caches and search/filter/sort results off the
   UI actor; generation checks reject obsolete results. A bounded ImageIO cache
   downsamples display images without altering original stored/shared assets.
 
@@ -137,3 +137,5 @@ Production schema deployment, signed multi-account invitation/permission/revocat
 and mixed-client validation, physical-device accessibility/performance, provider
 revocation, distribution validation and App Store disclosures remain real gates.
 Do not call #10, #16 or #17 complete based on mocks, unsigned builds or procedures.
+
+1.0 ships English. Presentation strings use the catalog, numbers/dates follow locale, and canonical numeric searches remain supported. Forced RTL/maximum-text simulator smoke is recorded alongside the remaining physical accessibility gates.

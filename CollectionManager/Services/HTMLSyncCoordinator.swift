@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct WebSyncApplyResult: Sendable {
+nonisolated struct WebSyncApplyResult: Sendable {
     var added = 0
     var updated = 0
     var addedItems: [String] = []

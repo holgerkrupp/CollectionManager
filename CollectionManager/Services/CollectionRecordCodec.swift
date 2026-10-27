@@ -17,13 +17,13 @@ enum CollectionCodecError: LocalizedError, Sendable {
     case legacyReconciliationRequired
     var errorDescription: String? {
         switch self {
-        case .accountPartitionMismatch: "This library belongs to a different iCloud account. Sign in with the previous account to resume collaboration; your local library has been preserved."
-        case .routingUnavailable: "The collection’s iCloud location is not available yet. Reconnect to iCloud and retry."
-        case .malformedRecord: "An iCloud record could not be read safely. Your pending changes have been retained."
-        case .missingRoot: "The shared collection has not finished importing. Retry when iCloud is available."
-        case .handoffIncomplete: "Collaboration setup has not finished. Retry to resume it safely."
-        case .legacyReconciliationRequired: "Some older local records could not be confirmed in iCloud. Their recoverable snapshots have been preserved; review migration recovery before completing collaboration setup."
-        case .invalidPageSize: "The requested sync page size is invalid."
+        case .accountPartitionMismatch: String(localized: "This library belongs to a different iCloud account. Sign in with the previous account to resume collaboration; your local library has been preserved.")
+        case .routingUnavailable: String(localized: "The collection’s iCloud location is not available yet. Reconnect to iCloud and retry.")
+        case .malformedRecord: String(localized: "An iCloud record could not be read safely. Your pending changes have been retained.")
+        case .missingRoot: String(localized: "The shared collection has not finished importing. Retry when iCloud is available.")
+        case .handoffIncomplete: String(localized: "Collaboration setup has not finished. Retry to resume it safely.")
+        case .legacyReconciliationRequired: String(localized: "Some older local records could not be confirmed in iCloud. Their recoverable snapshots have been preserved; review migration recovery before completing collaboration setup.")
+        case .invalidPageSize: String(localized: "The requested sync page size is invalid.")
         }
     }
 }
@@ -47,6 +47,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     nonisolated let accountPartitionIdentifier: String
     nonisolated let partition: String
     nonisolated let graphPartition: String
+    private let writeCoordinator: StoreWriteCoordinator
+    private var operationDepth = 0
+    private var operationSnapshot: StoreWriteCoordinator.Snapshot?
     private var inFlight: [String: UUID] = [:]
     private var persistenceFailure: (() throws -> Void)?
 
@@ -54,6 +57,7 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
         self.modelContainer = modelContainer
+        writeCoordinator = .forContainer(modelContainer)
         modelExecutor = DefaultSerialModelExecutor(modelContext: context)
         self.containerIdentifier = containerIdentifier
         self.environment = environment
@@ -68,9 +72,33 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
 
     func setPersistenceFailureForTesting(_ failure: (() throws -> Void)?) { persistenceFailure = failure }
 
+    /// Nested delegate calls retain the snapshot captured before the outer read.
+    private func beginOperation() {
+        if operationDepth == 0 { operationSnapshot = writeCoordinator.snapshot() }
+        operationDepth += 1
+    }
+
+    private func endOperation() {
+        operationDepth -= 1
+        if operationDepth == 0 {
+            if modelContext.hasChanges { modelContext.rollback() }
+            operationSnapshot = nil
+        }
+    }
+
     private func commit() throws {
-        do { try persistenceFailure?(); try modelContext.save() }
-        catch { modelContext.rollback(); throw RepositoryError.saveFailed }
+        do {
+            try persistenceFailure?()
+            let changed = StoreWriteCoordinator.changedCollections(in: modelContext)
+            let committed = try writeCoordinator.commit(expected: operationSnapshot, changedCollections: changed) {
+                try modelContext.save()
+            }
+            // Do not bless unrelated scopes that changed while this operation read.
+            for id in changed { operationSnapshot?[id] = committed[id] }
+        } catch {
+            modelContext.rollback()
+            throw RepositoryError.saveFailed
+        }
     }
 
     private func states() throws -> [CollectionTransportState] {
@@ -123,7 +151,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func beginHandoff(legacyState: Data? = nil) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         try claimGraph()
         for scope in [CollaborationDatabaseScope.private, .shared] {
@@ -137,6 +166,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func handoffStatus() throws -> String {
+        beginOperation()
+        defer { endOperation() }
+
         let statuses = try states().map(\.handoffStage)
         if statuses.count == 2 && statuses.allSatisfy({ $0 == "complete" }) { return "complete" }
         if statuses.contains("journaled") { return "journaled" }
@@ -145,7 +177,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func completeHandoff() throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard try handoffStatus() == "reconciling" || handoffStatus() == "complete" else { throw CollectionCodecError.handoffIncomplete }
         let eligible = try eligibleCollectionIDs()
@@ -157,7 +190,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func registerCollection(collectionID: UUID, zoneID: CKRecordZone.ID, scope: CollaborationDatabaseScope, shareRecordName: String? = nil, role: CollectionMemberRole) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard !zoneID.ownerName.isEmpty, !zoneID.zoneName.isEmpty else { throw CollectionCodecError.routingUnavailable }
         let value: CollectionZone
@@ -182,7 +216,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func updateAccess(collectionID: UUID, role: CollectionMemberRole) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard let zone = try zones().first(where: { $0.collectionID == collectionID }) else { throw CollectionCodecError.routingUnavailable }
         zone.roleRawValue = role.rawValue; zone.authoritative = true
@@ -191,7 +226,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func deactivateSharedCollection(collectionID: UUID) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
+
         guard let zone = try zones().first(where: { $0.collectionID == collectionID }), zone.scope == "shared" else { return }
         zone.active = false; zone.roleRawValue = "viewer"; zone.authoritative = true
         try applyAccess(collectionID: collectionID, role: .viewer)
@@ -202,12 +239,15 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         let id = collectionID
         let members = try modelContext.fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id })).filter { !$0.participantID.hasPrefix("share:") }
         if members.isEmpty { modelContext.insert(CollectionMemberRecord(collectionID: id, participantID: "cloud", role: role)) }
-        else { for member in members { member.roleRawValue = role.rawValue; member.updatedAt = .now } }
+        else { for member in members where member.roleRawValue != role.rawValue { member.roleRawValue = role.rawValue; member.updatedAt = .now } }
     }
 
     /// Only an explicit new-collection transaction authorizes creating a zone.
     /// A missing legacy zone must never be recreated as automatic recovery.
     func authorizedNewPrivateZones() throws -> [CKRecordZone.ID] {
+        beginOperation()
+        defer { endOperation() }
+
         let intents = try modelContext.fetch(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.operation == "createCollection" }))
         return try intents.map { intent in
             let zone = try locator(for: intent.collectionID)
@@ -217,6 +257,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func knownZones(in scope: CollaborationDatabaseScope) throws -> [CKRecordZone.ID] {
+        beginOperation()
+        defer { endOperation() }
+
         let all = try zones()
         let joinedIDs = Set(all.filter { $0.scope == "shared" }.map(\.collectionID))
         return all.filter { $0.scope == scope.rawValue && $0.active && (scope != .private || !joinedIDs.contains($0.collectionID)) }.map { CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName) }
@@ -236,6 +279,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func sharePlans() throws -> [CloudKitShareRootPlan] {
+        beginOperation()
+        defer { endOperation() }
+
         let collections = try modelContext.fetch(FetchDescriptor<CollectionRecord>())
         let plans = try collections.map { value in
             let zone = try locator(for: value.id)
@@ -247,11 +293,22 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         return plans
     }
 
-    func loadState(for scope: CollaborationDatabaseScope) throws -> Data? { try states().first(where: { $0.scope == scope.rawValue })?.engineState }
+    func loadState(for scope: CollaborationDatabaseScope) throws -> Data? {
+        beginOperation()
+        defer { endOperation() }
+        return try states().first(where: { $0.scope == scope.rawValue })?.engineState
+    }
     func saveState(_ data: Data, for scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
- try state(scope).engineState = data; try commit() }
+        beginOperation()
+        defer { endOperation() }
+
+        try state(scope).engineState = data
+        try commit()
+    }
     func reportStatePersistenceFailure(_ failure: CollaborationFailure, for scope: CollaborationDatabaseScope) {
+        beginOperation()
+        defer { endOperation() }
+
         do { try state(scope).lastFailure = "Collaboration progress could not be committed."; try commit() }
         catch { /* Preserve the previous durable state; the pool is already stopped. */ }
     }
@@ -268,12 +325,18 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func hasEligibleUnstagedMutations() throws -> Bool {
+        beginOperation()
+        defer { endOperation() }
+
         let eligible = try eligibleCollectionIDs()
         let covered = Set(try outgoing().flatMap { try JSONDecoder().decode([UUID].self, from: $0.mutationIDs) })
         return try first(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { eligible.contains($0.collectionID) && !covered.contains($0.id) })) != nil
     }
 
     func unreconciledBaselineCount() throws -> Int {
+        beginOperation()
+        defer { endOperation() }
+
         let key = partition
         return try modelContext.fetchCount(FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate { $0.partition == key && $0.operation == "baseline" }))
     }
@@ -281,6 +344,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     /// Bounded review data, never diagnostics. The user sees which legacy
     /// candidates were not confirmed in the unchanged server graph.
     func legacyCandidates(limit: Int = 50, offset: Int = 0) throws -> [CollectionLegacyCandidate] {
+        beginOperation()
+        defer { endOperation() }
+
         guard limit > 0, offset >= 0 else { throw CollectionCodecError.invalidPageSize }
         let key = partition, eligible = try eligibleCollectionIDs()
         var descriptor = FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate { $0.partition == key && $0.operation == "baseline" }, sortBy: [SortDescriptor(\.createdAt)])
@@ -295,7 +361,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     /// Called only after explicit user review; never from automatic startup or
     /// retry. Stage the current local value, retaining the recoverable baseline.
     func authorizeBaselineUpload(snapshotID: UUID) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
+
         try claimGraph()
         let key = partition
         guard let row = try first(FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate { $0.partition == key && $0.id == snapshotID && $0.operation == "baseline" })), let scope = CollaborationDatabaseScope(rawValue: row.scope) else { throw CollectionCodecError.malformedRecord }
@@ -310,7 +378,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     /// Existing local intent is already atomic with domain edits. Capture payloads
     /// and covered generation IDs before giving the engine anything to send.
     func stageRepositoryMutations(limit: Int = 400) throws -> [CollaborationDatabaseScope: [CloudKitRecordChange]] {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard limit > 0 else { throw CollectionCodecError.invalidPageSize }
         try claimGraph()
@@ -342,7 +411,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func stageLocalChanges(_ changes: [CloudKitRecordChange], advancingTo historyCursor: Data?, in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         for change in changes { try stage(change, mutationIDs: [], scope: scope) }
         try state(scope).historyCursor = historyCursor
@@ -388,6 +458,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func pendingLocalChanges(in scope: CollaborationDatabaseScope) throws -> [CloudKitRecordChange] {
+        beginOperation()
+        defer { endOperation() }
+
         let key = partition, raw = scope.rawValue
         let eligible = try eligibleCollectionIDs()
         var descriptor = FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate { $0.partition == key && $0.scope == raw && eligible.contains($0.collectionID) && ($0.operation == "save" || $0.operation == "delete") }, sortBy: [SortDescriptor(\.createdAt)])
@@ -408,6 +481,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     /// record-provider closure can remove that engine save; a failed host read
     /// must instead leave the entire batch pending for a later retry/restart.
     func prepareSendBatch(_ pending: [CKSyncEngine.PendingRecordZoneChange], in scope: CollaborationDatabaseScope) throws -> CKSyncEngine.RecordZoneChangeBatch? {
+        beginOperation()
+        defer { endOperation() }
+
         var saving: [CKRecord] = [], deleting: [CKRecord.ID] = []
         let eligible = try eligibleCollectionIDs()
         let allowed = try pending.filter { change in
@@ -432,6 +508,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
+        beginOperation()
+        defer { endOperation() }
+
         let scope: CollaborationDatabaseScope = syncEngine.database.databaseScope == .shared ? .shared : .private
         do {
             return try prepareSendBatch(syncEngine.state.pendingRecordZoneChanges.filter(context.options.scope.contains), in: scope)
@@ -442,6 +521,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func record(for recordID: CKRecord.ID, in scope: CollaborationDatabaseScope) throws -> CKRecord? {
+        beginOperation()
+        defer { endOperation() }
+
         guard let row = try outgoing(scope).first(where: { rowID($0) == recordID && $0.operation == "save" }) else { return nil }
         guard case .save(let record) = try restore(row) else { return nil }
         inFlight[identity(recordID, scope: scope)] = row.id
@@ -451,7 +533,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     /// One bounded page is committed with its cursor. A crash before commit
     /// repeats that page; a crash after commit resumes at the next page.
     func bootstrapPage(limit: Int = 400) throws -> Bool {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard limit > 0 else { throw CollectionCodecError.invalidPageSize }
         try claimGraph()
@@ -586,7 +669,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func acknowledgeSentChanges(savedRecords: [CKRecord], deletedRecordIDs: [CKRecord.ID], in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         for record in savedRecords { try remember(record, scope: scope); try markBaselineReconciled(record.recordID, scope: scope) }
         for id in deletedRecordIDs { try markBaselineReconciled(id, scope: scope) }
@@ -607,7 +691,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func applyRemoteChanges(records: [CKRecord], deletedRecordIDs: [CKRecord.ID], in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         modelContext.author = "CollectionManager.remote"
         defer { modelContext.author = nil }
@@ -759,7 +844,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func reconcileFailedSave(attemptedRecord: CKRecord, serverRecord: CKRecord?, error: CKError, in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         guard error.code == .serverRecordChanged, let serverRecord else { return }
         let deleteCollection = try self.collectionID(for: attemptedRecord.recordID.zoneID, scope: scope)
@@ -796,7 +882,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func retainFailedDelete(_ recordID: CKRecord.ID, error: CKError, in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         // No acknowledgement, no journal removal. A retry restores it on restart.
         try state(scope).lastFailure = "A cloud deletion is still pending."
@@ -804,7 +891,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     }
 
     func applyFetchedDatabaseChanges(_ event: CKSyncEngine.Event.FetchedDatabaseChanges, in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
 
         for deleted in event.deletions {
             for zone in try zones() where zone.scope == scope.rawValue && zone.zoneName == deleted.zoneID.zoneName && zone.ownerName == deleted.zoneID.ownerName {
@@ -814,14 +902,19 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         try commit()
     }
     func applySentDatabaseChanges(_ event: CKSyncEngine.Event.SentDatabaseChanges, in scope: CollaborationDatabaseScope) throws {
-        defer { if modelContext.hasChanges { modelContext.rollback() } }
+        beginOperation()
+        defer { endOperation() }
+
  try commit() }
     func accountDidChange(_ event: CKSyncEngine.Event.AccountChange, in scope: CollaborationDatabaseScope) throws { throw CollectionCodecError.accountPartitionMismatch }
 
     func encode(_ change: SwiftDataHistoryChange, in scope: CollaborationDatabaseScope) throws -> [CloudKitRecordChange] {
+        beginOperation()
+        defer { endOperation() }
+
         // The explicit repository outbox is the host's durable incremental source.
         // Imported transactions have no outbox rows and therefore cannot echo.
-        try stageRepositoryMutations()[scope] ?? []
+        return try stageRepositoryMutations()[scope] ?? []
     }
     func isHistoryCursorExpired(_ error: any Error) -> Bool { false }
     func recoverExpiredHistoryCursor(after cursorData: Data?, in scope: CollaborationDatabaseScope) throws -> SwiftDataHistoryBatch {

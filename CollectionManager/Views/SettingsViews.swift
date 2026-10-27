@@ -4,7 +4,7 @@ struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @AppStorage("global.defaultCollectionIcon") private var defaultIcon = "square.stack.3d.up.fill"
     @AppStorage("global.confirmDeletes") private var confirmDeletes = true
-    @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
+    @AppStorage("onboarding.hasCompleted", store: ApplicationPreferences.defaults) private var onboardingCompleted = false
     @AppStorage(AppTips.resetRequestKey) private var tipsResetRequested = false
     @State private var gamesEANAPIKey = ""
     @State private var credentialMessage: String?
@@ -28,7 +28,7 @@ struct SettingsView: View {
                         do {
                             try GamesEANAPIKeyStore.save(gamesEANAPIKey)
                             gamesEANAPIKey = ""
-                            credentialMessage = "API key saved in Keychain."
+                            credentialMessage = String(localized: "API key saved in Keychain.")
                         } catch { credentialMessage = error.localizedDescription }
                     }
                     .disabled(gamesEANAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -36,7 +36,7 @@ struct SettingsView: View {
                         do {
                             try GamesEANAPIKeyStore.save("")
                             gamesEANAPIKey = ""
-                            credentialMessage = "API key removed. Game lookup requires your own key."
+                            credentialMessage = String(localized: "API key removed. Game lookup requires your own key.")
                         } catch { credentialMessage = error.localizedDescription }
                     }
                     if let credentialMessage { Text(credentialMessage).font(.footnote) }
@@ -120,7 +120,7 @@ struct SettingsView: View {
             .confirmationDialog("Remove duplicate items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
                 Button("Remove Duplicates", role: .destructive) {
                     guard let removed = store.deduplicateItems() else { deduplicationMessage = nil; return }
-                    deduplicationMessage = removed == 0 ? "No duplicates found." : "Removed \(removed) duplicate item\(removed == 1 ? "" : "s")."
+                    deduplicationMessage = removed == 0 ? String(localized: "No duplicates found.") : String(localized: "Duplicate items removed: \(removed)")
                 }
                 Button("Cancel", role: .cancel) {}
             }
@@ -129,7 +129,7 @@ struct SettingsView: View {
 }
 
 private extension Bundle {
-    var shortVersion: String { object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
+    var shortVersion: String { object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? String(localized: "Development") }
     var buildNumber: String { object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1" }
 }
 
@@ -167,7 +167,7 @@ struct CollectionSettingsView: View {
                         HStack(spacing: 12) {
                             Image(systemName: status.symbol).foregroundStyle(status.color.color)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(status.name.isEmpty ? "Unnamed status" : status.name)
+                                Text(status.name.isEmpty ? String(localized: "Unnamed status") : status.name)
                             }
                         }
                     }
@@ -178,7 +178,7 @@ struct CollectionSettingsView: View {
                 }
                 .onMove { statuses.move(fromOffsets: $0, toOffset: $1) }
 
-                Button { statuses.append(CollectionStatus(name: "New status", color: .indigo, symbol: "circle")) } label: {
+                Button { statuses.append(CollectionStatus(name: String(localized: "New status"), color: .indigo, symbol: "circle")) } label: {
                     Label("Add status", systemImage: "plus.circle.fill")
                 }
             } header: {
@@ -193,7 +193,7 @@ struct CollectionSettingsView: View {
                         MetadataFieldDefinitionEditorView(field: $field)
                     } label: {
                         HStack {
-                            Label(field.name.isEmpty ? "Unnamed field" : field.name, systemImage: field.type.symbol)
+                            Label(field.name.isEmpty ? String(localized: "Unnamed field") : field.name, systemImage: field.type.symbol)
                             Spacer()
                             if field.showsInItemRows {
                                 Image(systemName: "eye.fill")
@@ -260,7 +260,7 @@ struct CollectionSettingsView: View {
         var cleaned = statuses
         for index in cleaned.indices {
             cleaned[index].name = cleaned[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if cleaned[index].name.isEmpty { cleaned[index].name = "Status \(index + 1)" }
+            if cleaned[index].name.isEmpty { cleaned[index].name = String(localized: "Status \(index + 1)") }
             if cleaned[index].symbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { cleaned[index].symbol = "circle" }
         }
         updated.statuses = cleaned
@@ -269,7 +269,7 @@ struct CollectionSettingsView: View {
         updated.metadataFields = metadataFields.enumerated().map { index, field in
             var field = field
             field.name = field.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if field.name.isEmpty { field.name = "Field \(index + 1)" }
+            if field.name.isEmpty { field.name = String(localized: "Field \(index + 1)") }
             return field
         }
         if store.updateCollection(updated) { dismiss() }
@@ -291,7 +291,7 @@ struct MetadataFieldDefinitionEditorView: View {
                 Toggle("Show in item rows", isOn: $field.showsInItemRows)
             }
             Section {
-                Label(field.name.isEmpty ? "Field name" : field.name, systemImage: field.type.symbol)
+                Label(field.name.isEmpty ? String(localized: "Field name") : field.name, systemImage: field.type.symbol)
             } header: {
                 Text("Preview")
             } footer: {
@@ -321,7 +321,7 @@ struct StatusEditorView: View {
                 CollectionSymbolPicker(selection: $status.symbol, suggestedSymbolName: status.symbol, tint: status.color.color)
             }
             Section("Preview") {
-                Label(status.name.isEmpty ? "Status" : status.name, systemImage: status.symbol.isEmpty ? "circle" : status.symbol)
+                Label(status.name.isEmpty ? String(localized: "Status") : status.name, systemImage: status.symbol.isEmpty ? "circle" : status.symbol)
                     .foregroundStyle(status.color.color)
             }
         }
@@ -352,7 +352,7 @@ struct EditCollectionView: View {
     @ViewBuilder private var categoryPicker: some View {
         Picker("Category", selection: $category) {
             ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in
-                Section(group) { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } }
+                Section { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } } header: { Text(LocalizedStringKey(group)) }
             }
         }
     }
@@ -360,12 +360,12 @@ struct EditCollectionView: View {
 
 struct NewCollectionView: View {
     @Environment(AppStore.self) private var store; @Environment(\.dismiss) private var dismiss
-    @State private var name = ""; @State private var subtitle = "Private"; @State private var icon = "square.stack.3d.up.fill"; @State private var category: CollectionCategory = .custom
+    @State private var name = ""; @State private var subtitle = String(localized: "Private"); @State private var icon = "square.stack.3d.up.fill"; @State private var category: CollectionCategory = .custom
     var body: some View { NavigationStack { Form { TextField("Collection name", text: $name); categoryPicker; TextField("Sharing", text: $subtitle); TextField("SF Symbol", text: $icon); CollectionSymbolPicker(selection: $icon, suggestedSymbolName: icon); Text("Category controls barcode providers and item detail fields.").font(.footnote).foregroundStyle(.secondary) }.navigationTitle("New collection").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { if store.addCollection(name: name, icon: icon, subtitle: subtitle, category: category) { dismiss() } }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty) } } } }
     @ViewBuilder private var categoryPicker: some View {
         Picker("Category", selection: $category) {
             ForEach(["Consumables & Care", "Games & Play", "Books & Media", "Toys, Collectibles & General Products", "Flexible"], id: \.self) { group in
-                Section(group) { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } }
+                Section { ForEach(CollectionCategory.allCases.filter { $0.pickerGroup == group }) { Text($0.name).tag($0) } } header: { Text(LocalizedStringKey(group)) }
             }
         }
     }

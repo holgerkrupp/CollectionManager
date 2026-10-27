@@ -76,7 +76,7 @@ private enum ConditionalActionKind: String, CaseIterable, Identifiable {
     case status
     case metadata
     var id: String { rawValue }
-    var label: String { self == .status ? "Set status" : "Set metadata" }
+    var label: String { self == .status ? String(localized: "Set status") : String(localized: "Set metadata") }
 }
 
 private struct ConditionalMappingRuleEditor: View {
@@ -262,6 +262,7 @@ struct ImportReviewView: View {
     @Environment(\.dismiss) private var dismiss
 
     let drafts: [ImportDraft]
+    let collectionID: UUID
     let useSourceDeduplication: Bool
     let onImport: (() -> Void)?
     let metadataFieldsToCreate: [MetadataFieldDefinition]
@@ -271,9 +272,12 @@ struct ImportReviewView: View {
     @State private var showingDeduplicationConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var maintenanceMessage: String?
+    @State private var isImporting = false
+    @State private var importFailure: String?
 
-    init(drafts: [ImportDraft], useSourceDeduplication: Bool = false, metadataFieldsToCreate: [MetadataFieldDefinition] = [], metadataFields: [MetadataFieldDefinition] = [], allowsDuplicates: Bool = false, onImport: (() -> Void)? = nil) {
+    init(drafts: [ImportDraft], collectionID: UUID, useSourceDeduplication: Bool = false, metadataFieldsToCreate: [MetadataFieldDefinition] = [], metadataFields: [MetadataFieldDefinition] = [], allowsDuplicates: Bool = false, onImport: (() -> Void)? = nil) {
         self.drafts = drafts
+        self.collectionID = collectionID
         self.useSourceDeduplication = useSourceDeduplication
         self.allowsDuplicates = allowsDuplicates
         self.metadataFieldsToCreate = metadataFieldsToCreate
@@ -282,12 +286,24 @@ struct ImportReviewView: View {
         _selected = State(initialValue: Set(drafts.map(\.id)))
     }
 
+    private var targetCollection: CollectionModel? { store.collections.first { $0.id == collectionID } }
+
     var body: some View {
         NavigationStack {
             List {
+                if isImporting {
+                    Section { ProgressView("Importing items…") }
+                }
+                if let importFailure {
+                    Section("Import needs attention") {
+                        Text(importFailure).foregroundStyle(.secondary)
+                        Text("Your selection is still here. Review the library before retrying.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     HStack {
-                        Button(selected.count == drafts.count ? "Deselect all" : "Select all") {
+                        Button(selected.count == drafts.count ? String(localized: "Deselect all") : String(localized: "Select all")) {
                             selected = selected.count == drafts.count ? [] : Set(drafts.map(\.id))
                         }
                         Spacer()
@@ -303,7 +319,7 @@ struct ImportReviewView: View {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: selected.contains(draft.id) ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(selected.contains(draft.id) ? Color.accentColor : Color.secondary)
-                                ImportDraftDetails(draft: draft, metadataFields: metadataFields)
+                                ImportDraftDetails(draft: draft, collection: targetCollection, metadataFields: metadataFields)
                                 Spacer(minLength: 0)
                             }
                             .contentShape(Rectangle())
@@ -323,36 +339,41 @@ struct ImportReviewView: View {
                 }
 
                 Section {
-                    Text(allowsDuplicates ? "Every selected row becomes its own item, even when another item has the same title, brand and variant." : "Rows whose title, brand and variant already exist in the collection are skipped.")
+                    Text(allowsDuplicates ? String(localized: "Every selected row becomes its own item, even when another item has the same title, brand and variant.") : String(localized: "Rows whose title, brand and variant already exist in the collection are skipped."))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
+            .disabled(isImporting)
             .navigationTitle("Review import")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isImporting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Import \(selected.count)") { importSelected() }
-                        .disabled(selected.isEmpty)
+                    Button("Import \(selected.count)") { Task { await importSelected() } }
+                        .disabled(selected.isEmpty || isImporting)
                 }
             }
             .confirmationDialog("Remove duplicate imported items? The newest copy will be kept.", isPresented: $showingDeduplicationConfirmation, titleVisibility: .visible) {
                 Button("Deduplicate", role: .destructive) {
+                    guard ensureImportTargetSelected() else { return }
                     guard let removed = store.deduplicateImportedItems() else { maintenanceMessage = nil; return }
-                    maintenanceMessage = removed == 0 ? "No duplicates found." : "Removed \(removed) duplicate item\(removed == 1 ? "" : "s")."
+                    maintenanceMessage = removed == 0 ? String(localized: "No duplicates found.") : String(localized: "Duplicate items removed: \(removed)")
                 }
                 Button("Cancel", role: .cancel) {}
             }
             .confirmationDialog("Delete all imported items? This cannot be undone.", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
                 Button("Delete All", role: .destructive) {
+                    guard ensureImportTargetSelected() else { return }
                     guard let removed = store.deleteAllImportedItems() else { maintenanceMessage = nil; return }
-                    maintenanceMessage = "Deleted \(removed) imported item\(removed == 1 ? "" : "s")."
+                    maintenanceMessage = String(localized: "Imported items deleted: \(removed)")
                 }
                 Button("Cancel", role: .cancel) {}
             }
         }
+        .interactiveDismissDisabled(isImporting)
         // A sheet on macOS sizes itself to its content, and a List has no
         // intrinsic height, so without this the review list collapses to nothing.
         #if os(macOS)
@@ -364,22 +385,48 @@ struct ImportReviewView: View {
         if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
     }
 
-    private func importSelected() {
+    private func importSelected() async {
+        guard !isImporting, !selected.isEmpty else { return }
+        guard ensureImportTargetSelected() else { return }
+        isImporting = true
+        defer { isImporting = false }
+        importFailure = nil
+        store.persistenceError = nil
+        store.itemActionError = nil
         let selectedDrafts = drafts.filter { selected.contains($0.id) }
-        guard store.addMetadataFields(metadataFieldsToCreate) else { return }
+        let committed: Bool
         if useSourceDeduplication {
-            guard store.importDrafts(selectedDrafts) else { return }
+            committed = await store.importDrafts(selectedDrafts, collectionID: collectionID, metadataFieldsToCreate: metadataFieldsToCreate)
         } else {
-            guard store.importNewDrafts(selectedDrafts, allowsDuplicates: allowsDuplicates) else { return }
+            committed = await store.importNewDrafts(selectedDrafts, allowsDuplicates: allowsDuplicates, collectionID: collectionID, metadataFieldsToCreate: metadataFieldsToCreate)
         }
+        guard committed else { captureImportFailure(); return }
         onImport?()
         dismiss()
     }
+
+    private func ensureImportTargetSelected() -> Bool {
+        guard store.selectedCollection?.id == collectionID, targetCollection != nil else {
+            importFailure = String(localized: "This import belongs to a different collection. Select its original collection and retry, or cancel and start a new import.")
+            return false
+        }
+        return true
+    }
+
+    private func captureImportFailure() {
+        // Consume this operation's error while the review remains presented;
+        // a parent alert must not replace the user's retained import selection.
+        importFailure = store.persistenceError ?? store.itemActionError ??
+            String(localized: "The import could not be completed.")
+        store.persistenceError = nil
+        store.itemActionError = nil
+    }
+
 }
 
 struct ImportDraftDetails: View {
-    @Environment(AppStore.self) private var store
     let draft: ImportDraft
+    let collection: CollectionModel?
     var metadataFields: [MetadataFieldDefinition] = []
 
     var body: some View {
@@ -402,15 +449,15 @@ struct ImportDraftDetails: View {
         func add(_ label: String, _ value: String) {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
-            parts.append("\(label): \(trimmed)")
+            parts.append(String(localized: "\(label): \(trimmed)"))
         }
-        add("Brand", draft.brand)
-        add("Variant", draft.variant)
-        add("Description", draft.description)
-        add("Status", store.status(for: draft.state).name)
-        if draft.quantity != 1 { add("Quantity", "\(draft.quantity)") }
-        if let barcode = draft.barcode { add("Barcode", barcode.value) }
-        if !draft.tags.isEmpty { add("Tags", draft.tags.joined(separator: ", ")) }
+        add(String(localized: "Brand"), draft.brand)
+        add(String(localized: "Variant"), draft.variant)
+        add(String(localized: "Description"), draft.description)
+        add(String(localized: "Status"), (collection?.status(for: draft.state) ?? CollectionStatus.fallback(for: draft.state)).name)
+        if draft.quantity != 1 { add(String(localized: "Quantity"), draft.quantity.formatted()) }
+        if let barcode = draft.barcode { add(String(localized: "Barcode"), barcode.value) }
+        if !draft.tags.isEmpty { add(String(localized: "Tags"), draft.tags.joined(separator: ", ")) }
         for field in metadataFields {
             if let value = draft.metadata[field.storageKey] { add(field.name, value.displayValue) }
         }

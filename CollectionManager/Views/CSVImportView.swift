@@ -9,6 +9,7 @@ struct CSVImportView: View {
     @Environment(\.dismiss) private var dismiss
 
     let file: CSVParsedFile
+    let collectionID: UUID
 
     @State private var delimiter: CSVDelimiter
     @State private var firstRowIsHeader: Bool
@@ -23,16 +24,41 @@ struct CSVImportView: View {
     @State private var showingAdvanced = false
     @State private var allowsDuplicates = false
     @State private var preparation: ImportPreparation?
+    @State private var sourceWorker: Task<CSVSourceAnalysis, Error>?
+    @State private var analysisWorker: Task<CSVMappingAnalysis, Error>?
+    @State private var reviewWorker: Task<ImportPreparation, Error>?
+    @State private var sourceGeneration: UInt64 = 0
+    @State private var reviewGeneration: UInt64 = 0
+    @State private var hasLoadedSource = false
+    @State private var pendingSourceResuggest = true
+    @State private var isLoadingSource = false
+    @State private var isPreparingReview = false
+    @State private var preparationError: String?
+    @State private var analysis: CSVMappingAnalysis?
+    @State private var analyzedIdentity: AnalysisIdentity?
 
-    private let importer = CollectionImporter()
+    nonisolated private struct AnalysisIdentity: Hashable, Sendable {
+        let tableID: UUID
+        let mapping: [ImportColumnDestination]
+        let titleColumns: [Int]
+        let visibleItemsRevision: UInt64
+        let sourceGeneration: UInt64
+        let collectionID: UUID
+    }
 
-    init(file: CSVParsedFile) {
+    init(file: CSVParsedFile, collectionID: UUID) {
         self.file = file
+        self.collectionID = collectionID
         _delimiter = State(initialValue: file.detectedDelimiter)
         _firstRowIsHeader = State(initialValue: file.suggestsHeaderRow)
     }
 
-    private var metadataFields: [MetadataFieldDefinition] { store.selectedCollection?.metadataFields ?? [] }
+    private var targetCollection: CollectionModel? { store.collections.first { $0.id == collectionID } }
+    private var metadataFields: [MetadataFieldDefinition] { targetCollection?.metadataFields ?? [] }
+    private var targetStatuses: [CollectionStatus] {
+        guard let statuses = targetCollection?.statuses, !statuses.isEmpty else { return CollectionStatus.defaults }
+        return statuses
+    }
 
     var body: some View {
         NavigationStack {
@@ -48,6 +74,17 @@ struct CSVImportView: View {
                 .frame(maxWidth: 900, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
+            .disabled(isPreparingReview)
+            .safeAreaInset(edge: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if isLoadingSource { ProgressView("Reading import…") }
+                    else if isPreparingReview { ProgressView("Preparing import review…") }
+                    else if !isAnalysisReady { ProgressView("Analyzing import…") }
+                    if let preparationError { Text(preparationError).font(.footnote).foregroundStyle(.secondary) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+            }
             .background(Color.platformGroupedBackground)
             .navigationTitle("Import CSV")
             .toolbar {
@@ -57,12 +94,24 @@ struct CSVImportView: View {
                         .disabled(!canContinue)
                 }
             }
-            .onAppear { rebuildTable(resuggestMapping: true) }
+            .onAppear {
+                if !hasLoadedSource || isLoadingSource {
+                    rebuildTable(resuggestMapping: hasLoadedSource ? pendingSourceResuggest : true)
+                }
+            }
             .onChange(of: delimiter) { rebuildTable(resuggestMapping: true) }
             .onChange(of: firstRowIsHeader) { rebuildTable(resuggestMapping: true) }
+            .onChange(of: metadataFields) { _, _ in rebuildTable(resuggestMapping: false) }
+            .task(id: analysisIdentity) { await analyzeMapping() }
+            .onDisappear {
+                sourceWorker?.cancel()
+                analysisWorker?.cancel()
+                reviewWorker?.cancel()
+            }
             .sheet(item: $preparation) { preparation in
                 ImportReviewView(
                     drafts: preparation.drafts,
+                    collectionID: collectionID,
                     metadataFieldsToCreate: preparation.newMetadataFields,
                     metadataFields: preparation.metadataFields,
                     allowsDuplicates: allowsDuplicates,
@@ -82,7 +131,7 @@ struct CSVImportView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(file.fileName)
                     .font(.headline)
-                Text("\(table.rows.count) data \(table.rows.count == 1 ? "row" : "rows") · \(table.headers.count) \(table.headers.count == 1 ? "column" : "columns")")
+                Text("Data rows: \(table.rows.count) · Columns: \(table.headers.count)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -91,7 +140,7 @@ struct CSVImportView: View {
                 Toggle(isOn: $firstRowIsHeader) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("First row contains column names")
-                        Text(firstRowIsHeader ? "The first row is used as the column names and is not imported." : "Every row is imported. Columns are numbered instead of named.")
+                        Text(firstRowIsHeader ? String(localized: "The first row is used as the column names and is not imported.") : String(localized: "Every row is imported. Columns are numbered instead of named."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -99,7 +148,7 @@ struct CSVImportView: View {
 
                 Picker("Separator", selection: $delimiter) {
                     ForEach(CSVDelimiter.allCases) { option in
-                        Text(option.label + (option == file.detectedDelimiter ? "  (detected)" : "")).tag(option)
+                        Text(option == file.detectedDelimiter ? String(localized: "\(option.label) (detected)") : option.label).tag(option)
                     }
                 }
                 .pickerStyle(.menu)
@@ -168,7 +217,7 @@ struct CSVImportView: View {
                         .foregroundStyle(.orange)
                         .font(.subheadline)
                 } else {
-                    Label("\(importableRowCount) \(importableRowCount == 1 ? "item" : "items") will be created.", systemImage: "checkmark.circle.fill")
+                    Label("Items to create: \(importableRowCount)", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.subheadline)
                 }
@@ -188,12 +237,12 @@ struct CSVImportView: View {
                 }
                 if duplicateTitleCount > 0 {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("\(duplicateTitleCount) \(duplicateTitleCount == 1 ? "row repeats" : "rows repeat") a title, brand and variant that another row or an existing item already uses.", systemImage: "exclamationmark.triangle.fill")
+                        Label("Rows matching an existing title, brand and variant: \(duplicateTitleCount)", systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.orange)
                         Toggle("Import repeated rows anyway", isOn: $allowsDuplicates)
                             .font(.subheadline)
-                        Text(allowsDuplicates ? "Every row becomes its own item." : "Repeated rows are skipped. Add more columns to the Title to tell them apart.")
+                        Text(allowsDuplicates ? String(localized: "Every row becomes its own item.") : String(localized: "Repeated rows are skipped. Add more columns to the Title to tell them apart."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -204,7 +253,7 @@ struct CSVImportView: View {
                         .foregroundStyle(.secondary)
                 }
                 if ignoredColumnCount > 0 {
-                    Label("\(ignoredColumnCount) \(ignoredColumnCount == 1 ? "column is" : "columns are") not imported.", systemImage: "minus.circle")
+                    Label("Columns not imported: \(ignoredColumnCount)", systemImage: "minus.circle")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -269,7 +318,7 @@ struct CSVImportView: View {
             }
 
             Toggle(isOn: titleParticipation(at: index)) {
-                Text(destination(at: index) == .standard(.title) ? "Use in the item title" : "Also use in the item title")
+                Text(destination(at: index) == .standard(.title) ? String(localized: "Use in the item title") : String(localized: "Also use in the item title"))
                     .font(.subheadline)
             }
             .platformCheckboxToggle()
@@ -288,7 +337,7 @@ struct CSVImportView: View {
             Section("Item fields") {
                 ForEach(HTMLImportField.allCases.filter { $0 != .ignore }) { field in
                     Button { setMapping(.standard(field), at: index) } label: {
-                        Label(field.label + (field == .title ? " (required)" : ""), systemImage: symbol(for: field))
+                        Label(field == .title ? String(localized: "Title (required)") : field.label, systemImage: symbol(for: field))
                     }
                 }
             }
@@ -373,24 +422,24 @@ struct CSVImportView: View {
                     ForEach($conditionalRules) { $rule in
                         ConditionalRuleRow(
                             headers: table.headers,
-                            statuses: store.statuses,
+                            statuses: targetStatuses,
                             metadataFields: metadataFields,
                             rule: $rule,
                             onDelete: { conditionalRules.removeAll { $0.id == rule.id } }
                         )
                     }
                     Button {
-                        if let header = table.headers.first, let status = store.statuses.first {
+                        if let header = table.headers.first, let status = targetStatuses.first {
                             conditionalRules.append(ConditionalMappingRule(sourceColumn: header, equalsValue: "", action: .status(status.id)))
                         }
                     } label: {
                         Label("Add rule", systemImage: "plus.circle")
                     }
-                    .disabled(table.headers.isEmpty || store.statuses.isEmpty)
+                    .disabled(table.headers.isEmpty || targetStatuses.isEmpty)
                 }
                 .padding(.top, 8)
             } label: {
-                Text("Conditional rules\(conditionalRules.isEmpty ? "" : " (\(conditionalRules.count))")")
+                Text(conditionalRules.isEmpty ? String(localized: "Conditional rules") : String(localized: "Conditional rules (\(conditionalRules.count))"))
                     .font(.subheadline)
             }
         }
@@ -406,16 +455,24 @@ struct CSVImportView: View {
 
     private var hasTitleColumn: Bool { !titleColumnIndices.isEmpty }
 
-    private var canContinue: Bool { hasTitleColumn && importableRowCount > 0 }
+    private var canContinue: Bool {
+        hasTitleColumn && importableRowCount > 0 && isAnalysisReady && !isPreparingReview && preparationError == nil
+    }
+
+    private var analysisIdentity: AnalysisIdentity {
+        AnalysisIdentity(tableID: table.id, mapping: mapping, titleColumns: titleColumnIndices,
+                         visibleItemsRevision: store.visibleItemsRevision, sourceGeneration: sourceGeneration,
+                         collectionID: collectionID)
+    }
+
+    private var isAnalysisReady: Bool { !isLoadingSource && analyzedIdentity == analysisIdentity && analysis != nil }
+    private var currentAnalysis: CSVMappingAnalysis? { isAnalysisReady ? analysis : nil }
 
     private var importButtonTitle: String {
-        hasTitleColumn ? "Review \(importableRowCount)" : "Review"
+        hasTitleColumn ? String(localized: "Review \(importableRowCount)") : String(localized: "Review")
     }
 
-    private var importableRowCount: Int {
-        guard hasTitleColumn else { return 0 }
-        return table.rows.filter { !composedTitle(for: $0).isEmpty }.count
-    }
+    private var importableRowCount: Int { currentAnalysis?.importableRowCount ?? 0 }
 
     private var titleColumnIndices: [Int] {
         titleColumns.filter { table.headers.indices.contains($0) }.sorted()
@@ -444,40 +501,11 @@ struct CSVImportView: View {
     private var titleSourceDescription: String {
         let names = titleColumnIndices.compactMap { table.headers.indices.contains($0) ? table.headers[$0] : nil }
         guard !names.isEmpty else { return "" }
-        return names.count == 1 ? "Title comes from “\(names[0])”." : "Title combines " + names.map { "“\($0)”" }.joined(separator: " + ") + "."
+        return names.count == 1 ? String(localized: "Title comes from “\(names[0])”.") : String(localized: "Title combines these columns: \(names.formatted(.list(type: .and))).")
     }
 
-    private func composedTitle(for row: [String]) -> String {
-        titleColumnIndices.compactMap { index in
-            let value = index < row.count ? row[index].trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            return value.isEmpty ? nil : value
-        }.joined(separator: " ")
-    }
-
-    private var exampleTitle: String? {
-        table.rows.lazy.map(composedTitle(for:)).first { !$0.isEmpty }
-    }
-
-    /// Items are identified by title, brand and variant, so rows that share all
-    /// three collapse into one item unless duplicates are explicitly allowed.
-    private var duplicateTitleCount: Int {
-        guard hasTitleColumn else { return 0 }
-        let brandIndex = mapping.firstIndex(of: .standard(.brand))
-        let variantIndex = mapping.firstIndex(of: .standard(.variant))
-        func part(_ index: Int?, _ row: [String]) -> String {
-            guard let index, index < row.count else { return "" }
-            return row[index].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        }
-        var seen = Set(store.items.map { "\($0.title.lowercased())|\($0.brand.lowercased())|\($0.variant.lowercased())" })
-        var repeats = 0
-        for row in table.rows {
-            let title = composedTitle(for: row)
-            guard !title.isEmpty else { continue }
-            let key = "\(title.lowercased())|\(part(brandIndex, row))|\(part(variantIndex, row))"
-            if !seen.insert(key).inserted { repeats += 1 }
-        }
-        return repeats
-    }
+    private var exampleTitle: String? { currentAnalysis?.exampleTitle }
+    private var duplicateTitleCount: Int { currentAnalysis?.duplicateTitleCount ?? 0 }
 
     private var ignoredColumnCount: Int {
         table.headers.indices.filter { isIgnored($0) }.count
@@ -486,7 +514,7 @@ struct CSVImportView: View {
     private var newFieldSummaries: [String] {
         table.headers.indices.compactMap { index in
             guard case .newMetadata(let type) = destination(at: index) else { return nil }
-            return "\(resolvedNewFieldName(at: index)) (\(type.label.lowercased()))"
+            return String(localized: "\(resolvedNewFieldName(at: index)) (\(type.label))")
         }
     }
 
@@ -504,51 +532,33 @@ struct CSVImportView: View {
         let custom = newFieldNames[index]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !custom.isEmpty { return custom }
         let header = table.headers.indices.contains(index) ? table.headers[index] : ""
-        return header.isEmpty ? "Column \(index + 1)" : header
-    }
-
-    private func values(at index: Int) -> [String] {
-        table.rows.compactMap { index < $0.count ? $0[index].trimmingCharacters(in: .whitespacesAndNewlines) : nil }
-            .filter { !$0.isEmpty }
+        return header.isEmpty ? String(localized: "Column \(index + 1)") : header
     }
 
     private func examplesText(for index: Int) -> String {
-        let examples = values(at: index)
-        guard !examples.isEmpty else { return "No values in this column" }
-        return "e.g. " + examples.prefix(3).joined(separator: " · ")
+        let examples = currentAnalysis?.columns[index]?.examples ?? []
+        guard !examples.isEmpty else { return String(localized: "No values in this column") }
+        return String(localized: "Examples: \(examples.joined(separator: " · "))")
     }
 
     private func suggestedType(at index: Int) -> MetadataFieldType? {
-        let suggestion = importer.suggestMapping(for: CSVImportTable(headers: [table.headers.indices.contains(index) ? table.headers[index] : ""], rows: table.rows.map { index < $0.count ? [$0[index]] : [""] }), existingMetadataFields: [])
-        guard case .newMetadata(let type) = suggestion.first else { return nil }
-        return type
+        currentAnalysis?.columns[index]?.suggestedType
     }
 
-    /// Warns when the chosen type would silently drop values, which is easy to
-    /// cause by forcing a text column to Number or Date.
     private func conversionWarning(at index: Int, type: MetadataFieldType) -> String? {
-        guard type == .number || type == .date || type == .boolean else { return nil }
-        let all = values(at: index)
-        guard !all.isEmpty else { return nil }
-        let unreadable = all.filter { value in
-            switch type {
-            case .number: Double(value.replacingOccurrences(of: ",", with: ".")) == nil
-            case .date: MetadataDateParser.parse(value, hint: table.headers.indices.contains(index) ? table.headers[index] : "") == nil
-            case .boolean: !["true", "yes", "y", "1", "on", "false", "no", "n", "0", "off"].contains(value.lowercased())
-            default: false
-            }
-        }
-        guard !unreadable.isEmpty else { return nil }
-        return "\(unreadable.count) of \(all.count) values cannot be read as \(type.label.lowercased()) and will be left empty, for example “\(unreadable[0])”."
+        guard type == .number || type == .date || type == .boolean,
+              let column = currentAnalysis?.columns[index], column.unreadableCount > 0,
+              let firstUnreadable = column.firstUnreadable else { return nil }
+        return String(localized: "\(column.unreadableCount) of \(column.populatedCount) values cannot be read as \(type.label) and will be left empty, for example “\(firstUnreadable)”.")
     }
 
     private func shortDestinationLabel(at index: Int) -> String {
         switch destination(at: index) {
-        case .ignore: "Don't import"
-        case .standard(.title) where titleColumnIndices.count > 1: "Title part \(titlePartNumber(at: index) ?? 1)"
+        case .ignore: String(localized: "Don't import")
+        case .standard(.title) where titleColumnIndices.count > 1: String(localized: "Title part \(titlePartNumber(at: index) ?? 1)")
         case .standard(let field): field.label
-        case .existingMetadata(let id): metadataFields.first { $0.id == id }?.name ?? "Missing field"
-        case .newMetadata: "New: \(resolvedNewFieldName(at: index))"
+        case .existingMetadata(let id): metadataFields.first { $0.id == id }?.name ?? String(localized: "Missing field")
+        case .newMetadata: String(localized: "New: \(resolvedNewFieldName(at: index))")
         }
     }
 
@@ -557,7 +567,7 @@ struct CSVImportView: View {
     private func previewDestinationLabel(at index: Int) -> String {
         let base = shortDestinationLabel(at: index)
         guard let part = titlePartNumber(at: index), destination(at: index) != .standard(.title) else { return base }
-        return "\(base) + title \(part)"
+        return String(localized: "\(base) + title \(part)")
     }
 
     private func destinationSymbol(at index: Int) -> String {
@@ -627,29 +637,97 @@ struct CSVImportView: View {
     }
 
     private func rebuildTable(resuggestMapping: Bool) {
-        let rows = importer.rows(in: file.text, delimiter: delimiter)
-        table = importer.makeTable(rows: rows, firstRowIsHeader: firstRowIsHeader)
-        if resuggestMapping || mapping.count != table.headers.count {
-            mapping = importer.suggestMapping(for: table, existingMetadataFields: metadataFields, ensuresTitleColumn: true)
-            titleColumns = Set(mapping.indices.filter { mapping[$0] == .standard(.title) })
-            newFieldNames = [:]
-            conditionalRules = conditionalRules.filter { rule in
-                table.headers.contains { $0.localizedCaseInsensitiveCompare(rule.sourceColumn) == .orderedSame }
+        sourceWorker?.cancel()
+        reviewWorker?.cancel()
+        reviewGeneration &+= 1
+        isPreparingReview = false
+        sourceGeneration &+= 1
+        let generation = sourceGeneration
+        pendingSourceResuggest = resuggestMapping
+        isLoadingSource = true
+        preparationError = nil
+        let text = file.text, delimiter = self.delimiter, header = firstRowIsHeader, fields = metadataFields
+        let worker = Task.detached(priority: .userInitiated) {
+            try CSVImportAnalysis.source(text: text, delimiter: delimiter, firstRowIsHeader: header, metadataFields: fields)
+        }
+        sourceWorker = worker
+        Task {
+            do {
+                let result = try await worker.value
+                guard sourceGeneration == generation, !worker.isCancelled, fields == metadataFields else { return }
+                table = result.table
+                if resuggestMapping || mapping.count != result.table.headers.count {
+                    mapping = result.suggestedMapping
+                    titleColumns = Set(mapping.indices.filter { mapping[$0] == .standard(.title) })
+                    newFieldNames = [:]
+                    conditionalRules = conditionalRules.filter { rule in
+                        result.table.headers.contains { $0.localizedCaseInsensitiveCompare(rule.sourceColumn) == .orderedSame }
+                    }
+                }
+                hasLoadedSource = true
+                isLoadingSource = false
+            } catch {
+                guard sourceGeneration == generation, !worker.isCancelled else { return }
+                isLoadingSource = false
+                preparationError = error.localizedDescription
             }
         }
     }
 
-    private func prepareReview() {
-        preparation = importer.prepareImport(
-            from: table,
-            mapping: mapping,
-            existingMetadataFields: metadataFields,
-            conditionalRules: conditionalRules,
-            validStatusIDs: Set(store.statuses.map(\.id)),
-            newFieldNames: newFieldNames,
-            titleColumns: titleColumnIndices
-        )
+    private func analyzeMapping() async {
+        guard !isLoadingSource, !Task.isCancelled else { return }
+        let identity = analysisIdentity
+        if analyzedIdentity == identity, analysis != nil { return }
+        let table = self.table, mapping = self.mapping, titles = titleColumnIndices, items = store.items, id = collectionID
+        let worker = Task.detached(priority: .userInitiated) {
+            try CSVImportAnalysis.mapping(table: table, mapping: mapping, titleColumns: titles, existingItems: items, collectionID: id)
+        }
+        analysisWorker = worker
+        do {
+            let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, !isLoadingSource, analysisIdentity == identity else { return }
+            analysis = result
+            analyzedIdentity = identity
+        } catch {
+            guard !Task.isCancelled, !worker.isCancelled, analysisIdentity == identity else { return }
+            preparationError = error.localizedDescription
+        }
     }
+
+    private func prepareReview() {
+        guard canContinue else { return }
+        reviewWorker?.cancel()
+        reviewGeneration &+= 1
+        let generation = reviewGeneration, identity = analysisIdentity
+        let table = self.table, mapping = self.mapping, fields = metadataFields, rules = conditionalRules
+        let validIDs = Set(targetStatuses.map(\.id)), names = newFieldNames, titles = titleColumnIndices
+        isPreparingReview = true
+        preparationError = nil
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let result = CollectionImporter().prepareImport(from: table, mapping: mapping, existingMetadataFields: fields,
+                conditionalRules: rules, validStatusIDs: validIDs, newFieldNames: names, titleColumns: titles)
+            try Task.checkCancellation()
+            return result
+        }
+        reviewWorker = worker
+        Task {
+            do {
+                let result = try await worker.value
+                guard reviewGeneration == generation else { return }
+                isPreparingReview = false
+                guard !worker.isCancelled, analysisIdentity == identity, fields == metadataFields,
+                      rules == conditionalRules, names == newFieldNames,
+                      validIDs == Set(targetStatuses.map(\.id)) else { return }
+                preparation = result
+            } catch {
+                guard reviewGeneration == generation else { return }
+                isPreparingReview = false
+                if !worker.isCancelled { preparationError = error.localizedDescription }
+            }
+        }
+    }
+
 }
 
 /// A titled panel. The import screen is a scroll view rather than a form so the

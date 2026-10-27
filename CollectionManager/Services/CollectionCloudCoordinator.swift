@@ -69,8 +69,15 @@ import SwiftData
             throw CollectionCodecError.accountPartitionMismatch
         }
         if codec == nil {
-            let codec = CollectionRecordCodec(modelContainer: modelContainer, containerIdentifier: Self.containerIdentifier,
-                                              environment: Self.environment, accountPartitionIdentifier: account)
+            // Construct the model executor away from the UI executor so a large
+            // durable apply cannot bind its context to the main queue.
+            let container = modelContainer
+            let identifier = Self.containerIdentifier
+            let environment = Self.environment
+            let codec = await Task.detached {
+                CollectionRecordCodec(modelContainer: container, containerIdentifier: identifier,
+                                      environment: environment, accountPartitionIdentifier: account)
+            }.value
             // Preserve opaque manual change tokens as recovery evidence only.
             // They are never interpreted as CKSyncEngine serialization.
             let legacy = UserDefaults.standard.dictionaryRepresentation().filter {

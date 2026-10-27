@@ -19,11 +19,11 @@ enum CollectionSettingsPane: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .general: "General"
-        case .statuses: "Statuses"
-        case .metadata: "Item Metadata"
-        case .adding: "Adding"
-        case .notifications: "Notifications"
+        case .general: String(localized: "General")
+        case .statuses: String(localized: "Statuses")
+        case .metadata: String(localized: "Item Metadata")
+        case .adding: String(localized: "Adding")
+        case .notifications: String(localized: "Notifications")
         }
     }
 

@@ -50,10 +50,10 @@ nonisolated enum CSVDelimiter: String, CaseIterable, Identifiable, Codable, Send
 
     var label: String {
         switch self {
-        case .comma: "Comma  ,"
-        case .semicolon: "Semicolon  ;"
-        case .tab: "Tab"
-        case .pipe: "Pipe  |"
+        case .comma: String(localized: "Comma  ,")
+        case .semicolon: String(localized: "Semicolon  ;")
+        case .tab: String(localized: "Tab")
+        case .pipe: String(localized: "Pipe  |")
         }
     }
 }

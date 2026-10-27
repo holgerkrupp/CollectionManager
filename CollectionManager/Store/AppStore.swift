@@ -20,9 +20,12 @@ import SwiftData
     var selectedBrand: String? { didSet { rebuildVisibleItems() } }
     var itemSort: ItemSort = .updatedDescending { didSet { rebuildVisibleItems() } }
     private var searchIndex = ItemSearchIndex()
+    private var derivedTask: Task<ItemDerivedState, Error>?
+    private var derivedGeneration: UInt64 = 0
     private var queryTask: Task<[CollectionItem], Error>?
     private var queryGeneration: UInt64 = 0
-    private(set) var visibleItems: [CollectionItem] = []
+    private(set) var visibleItems: [CollectionItem] = [] { didSet { visibleItemsRevision &+= 1 } }
+    private(set) var visibleItemsRevision: UInt64 = 0
     private(set) var brands: [String] = []
     private(set) var hasDateTags = false
     private(set) var stats: (stored: Int, consumed: Int, wanted: Int) = (0, 0, 0)
@@ -60,7 +63,7 @@ import SwiftData
     }
 
     func beginIntentOperation() throws {
-        guard repository != nil else { throw RepositoryError.validation("Your library is unavailable. Open Collection Manager to recover the persistent store.") }
+        guard repository != nil else { throw RepositoryError.validation(String(localized: "Your library is unavailable. Open Collection Manager to recover the persistent store.")) }
         persistenceError = nil
         itemActionError = nil
     }
@@ -152,7 +155,7 @@ import SwiftData
         do {
             guard let collectionID = collectionID ?? selectedCollection?.id else { return nil }
             if let collection = collections.first(where: { $0.id == collectionID }), collection.barcodeRequired, barcode == nil {
-                itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+                itemActionError = String(localized: "A barcode is required for this collection. Add a valid barcode before saving the item.")
                 return nil
             }
             let item = CollectionItem(id: UUID(), collectionID: collectionID, title: title, brand: brand, variant: variant, itemDescription: description, state: state, quantity: quantity, barcode: barcode, createdAt: .now, updatedAt: .now, consumedAt: state == .consumed ? .now : nil, tags: tags, metadata: metadata, imageSystemName: "shippingbox.fill", imageData: imageData, importSourceKey: sourceIdentifier, sourceSnapshot: sourceSnapshot)
@@ -176,27 +179,26 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; return nil }
     }
-    @discardableResult func importDrafts(_ drafts: [ImportDraft]) -> Bool {
+    @discardableResult func importDrafts(_ drafts: [ImportDraft], collectionID: UUID? = nil, metadataFieldsToCreate: [MetadataFieldDefinition] = []) async -> Bool {
+        guard let backgroundRepository, let collectionID = collectionID ?? selectedCollection?.id else { return false }
+        let entries = drafts.map { draft in
+            (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)")
+        }
         do {
-            guard let repository, let collection = selectedCollection else { return false }
-            let accepted = drafts.filter { !collection.barcodeRequired || $0.barcode != nil }
-            if accepted.count != drafts.count {
-                itemActionError = "Some imported items were skipped because this collection requires a barcode."
-            }
-            let entries = accepted.map { draft in
-                (draft: draft, sourceKey: draft.sourceIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? draft.sourceIdentifier!.trimmingCharacters(in: .whitespacesAndNewlines) : "\(draft.title)|\(draft.brand)|\(draft.variant)")
-            }
-            try repository.importDrafts(entries, collectionID: collection.id)
-            loadSelectedCollection()
+            // The repository knows whether a matched item already has a barcode;
+            // filtering missing source values here would wrongly skip updates.
+            try await backgroundRepository.importDrafts(entries, collectionID: collectionID, metadataFieldsToCreate: metadataFieldsToCreate)
+            loadCollections()
+            if selectedCollection?.id == collectionID { await loadSelectedCollectionInBackground() }
             return true
-
         } catch { persistenceError = error.localizedDescription; return false }
     }
-    @discardableResult func importNewDrafts(_ drafts: [ImportDraft], allowsDuplicates: Bool) -> Bool {
-        guard let repository, let collectionID = selectedCollection?.id else { return false }
+    @discardableResult func importNewDrafts(_ drafts: [ImportDraft], allowsDuplicates: Bool, collectionID: UUID? = nil, metadataFieldsToCreate: [MetadataFieldDefinition] = []) async -> Bool {
+        guard let backgroundRepository, let collectionID = collectionID ?? selectedCollection?.id else { return false }
         do {
-            try repository.importNewDrafts(drafts, collectionID: collectionID, allowsDuplicates: allowsDuplicates)
-            loadSelectedCollection()
+            try await backgroundRepository.importNewDrafts(drafts, collectionID: collectionID, allowsDuplicates: allowsDuplicates, metadataFieldsToCreate: metadataFieldsToCreate)
+            loadCollections()
+            if selectedCollection?.id == collectionID { await loadSelectedCollectionInBackground() }
             return true
         } catch { persistenceError = error.localizedDescription; return false }
     }
@@ -226,7 +228,7 @@ import SwiftData
     @discardableResult func updateItem(_ item: CollectionItem, previousState: ItemState) -> Bool {
         do {
             if let collection = collections.first(where: { $0.id == item.collectionID }), collection.barcodeRequired, item.barcode == nil {
-                itemActionError = "A barcode is required for this collection. Add a valid barcode before saving the item."
+                itemActionError = String(localized: "A barcode is required for this collection. Add a valid barcode before saving the item.")
                 return false
             }
             guard let repository else { return false }; try repository.updateItem(item, previousState: previousState)
@@ -268,7 +270,7 @@ import SwiftData
                 // looked like a successful delete until the next refresh was the
                 // main reason deleting felt unreliable.
                 items.insert(item, at: min(previousIndex ?? items.count, items.count))
-                itemActionError = "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items."
+                itemActionError = String(localized: "“\(item.title)” could not be deleted. Only an owner or an editor of this collection can remove items.")
             }
             pendingItemOperations.remove(item.id)
             return succeeded
@@ -286,7 +288,7 @@ import SwiftData
             let removed = try await backgroundRepository?.deleteAllItems(in: collectionID) ?? repository.deleteAllItems(in: collectionID)
             if removed == 0, !previousItems.isEmpty {
                 loadSelectedCollection()
-                itemActionError = "The items could not be deleted. Only an owner or an editor of this collection can remove items."
+                itemActionError = String(localized: "The items could not be deleted. Only an owner or an editor of this collection can remove items.")
             }
             isBulkOperationInProgress = false
             if removed > 0 { Task { await syncCollections() } }
@@ -294,19 +296,19 @@ import SwiftData
 
         } catch { persistenceError = error.localizedDescription; loadSelectedCollection(); return nil }
     }
-    @discardableResult func saveWebSync(_ sync: WebSyncRecord) -> Bool {
-        do { guard let repository else { return false }; try repository.addWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
+    @discardableResult func saveWebSync(_ sync: WebSyncRecord, metadataFieldsToCreate: [MetadataFieldDefinition] = []) -> Bool {
+        do { guard let repository else { return false }; try repository.addWebSync(sync, metadataFieldsToCreate: metadataFieldsToCreate); loadCollections(); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
         } catch { persistenceError = error.localizedDescription; return false }
     }
-    @discardableResult func updateWebSync(_ sync: WebSyncRecord) -> Bool {
-        do { guard let repository else { return false }; try repository.updateWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
+    @discardableResult func updateWebSync(_ sync: WebSyncRecord, metadataFieldsToCreate: [MetadataFieldDefinition] = [], update: (WebSyncRecord) throws -> Void) -> Bool {
+        do { guard let repository else { return false }; try repository.updateWebSync(sync, metadataFieldsToCreate: metadataFieldsToCreate, update: update); loadCollections(); if let id = selectedCollection?.id { webSyncs = try repository.webSyncs(for: id) }; scheduleWebSync(); return true
         } catch { persistenceError = error.localizedDescription; return false }
     }
     func deleteWebSync(_ sync: WebSyncRecord) {
         do { try repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
         } catch { persistenceError = error.localizedDescription }
     }
-    func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? "Sync complete: \(result.added) added, \(result.updated) updated"; scheduleWebSync(); await loadSelectedCollectionInBackground() }
+    func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? String(localized: "Sync complete. Added: \(result.added). Updated: \(result.updated)."); scheduleWebSync(); await loadSelectedCollectionInBackground() }
 
     private func scheduleWebSync() {
         guard let modelContext else { return }
@@ -438,7 +440,7 @@ import SwiftData
     var itemSortLabel: String {
         guard case .metadata(let fieldID, let direction) = itemSort else { return itemSort.label }
         guard let field = selectedCollection?.metadataFields.first(where: { $0.id == fieldID }) else { return ItemSort.updatedDescending.label }
-        return "\(field.name) (\(direction.label.lowercased()))"
+        return String(localized: "\(field.name) (\(direction.label.lowercased()))")
     }
     func status(for state: ItemState, in collection: CollectionModel? = nil) -> CollectionStatus { (collection ?? selectedCollection)?.status(for: state) ?? CollectionStatus.fallback(for: state) }
     func barcodeStatus(_ barcode: Barcode) -> ItemState? { items.first(where: { $0.barcode == barcode })?.state }
@@ -451,16 +453,16 @@ import SwiftData
             return try collections.flatMap { collection in
                 try repository.items(in: collection.id).compactMap { item in
                     var matchedBy: [String] = []
-                    if item.barcode == barcode { matchedBy.append("Barcode") }
+                    if item.barcode == barcode { matchedBy.append(String(localized: "Barcode")) }
                     if let normalizedName, !normalizedName.isEmpty {
                         let itemWords = Self.words(item.title)
                         if Self.normalizedText(item.title) == normalizedName || nameWords.isSubset(of: itemWords) {
-                            matchedBy.append("Name")
+                            matchedBy.append(String(localized: "Name"))
                         }
                         let normalizedTags = item.tags.map(Self.normalizedText)
                         let tagWords = Set(normalizedTags.flatMap(Self.words))
                         if normalizedTags.contains(normalizedName) || nameWords.isSubset(of: tagWords) {
-                            matchedBy.append("Tags")
+                            matchedBy.append(String(localized: "Tags"))
                         }
                     }
                     guard !matchedBy.isEmpty else { return nil }
@@ -473,16 +475,36 @@ import SwiftData
     func refreshLocale() { rebuildDerivedItemState() }
 
     private func rebuildDerivedItemState() {
-        searchIndex.rebuild(items: items)
-        brands = Array(Set(items.lazy.map(\.brand).filter { !$0.isEmpty })).sorted()
-        hasDateTags = items.contains { !$0.dateTags.isEmpty }
-        var stored = 0, consumed = 0, wanted = 0
-        for item in items {
-            if item.state == .stored { stored += 1 }
-            if item.state == .consumed { consumed += 1 }
-            if item.state == .wanted { wanted += 1 }
+        derivedTask?.cancel()
+        derivedGeneration &+= 1
+        let generation = derivedGeneration
+        let snapshot = items
+        let locale = Locale.current
+        if let collectionID = snapshot.first?.collectionID, visibleItems.first?.collectionID != collectionID {
+            visibleItems = []; brands = []; hasDateTags = false; stats = (0, 0, 0)
         }
-        stats = (stored, consumed, wanted)
+        if snapshot.isEmpty {
+            derivedTask = nil
+            searchIndex = ItemSearchIndex()
+            brands = []; hasDateTags = false; stats = (0, 0, 0)
+            visibleItems = []
+            rebuildVisibleItems()
+            return
+        }
+        let worker = Task.detached(priority: .userInitiated) {
+            try ItemDerivedState.prepare(items: snapshot, locale: locale)
+        }
+        derivedTask = worker
+        Task { [weak self] in
+            do {
+                let result = try await worker.value
+                guard let self, self.derivedGeneration == generation else { return }
+                self.searchIndex = result.searchIndex
+                self.brands = result.brands
+                self.hasDateTags = result.hasDateTags
+                self.stats = result.stats
+            } catch { /* A newer item/locale generation owns preparation. */ }
+        }
         rebuildVisibleItems()
     }
 
@@ -493,10 +515,20 @@ import SwiftData
         queryTask?.cancel()
         queryGeneration &+= 1
         let generation = queryGeneration
-        let request = ItemQueryRequest(items: items, searchIndex: searchIndex,
-            searchText: searchText, selectedState: selectedState, selectedBrand: selectedBrand,
-            sort: itemSort, metadataFields: selectedCollection?.metadataFields ?? [])
-        let worker = Task.detached(priority: .userInitiated) { try ItemQueryProcessor.evaluate(request) }
+        let snapshot = items
+        let prepared = derivedTask
+        let priorIndex = searchIndex
+        let text = searchText, state = selectedState, brand = selectedBrand, sort = itemSort
+        let fields = selectedCollection?.metadataFields ?? []
+        let locale = Locale.current
+        let worker = Task.detached(priority: .userInitiated) {
+            let index = try await prepared?.value.searchIndex ?? priorIndex
+            try Task.checkCancellation()
+            let request = ItemQueryRequest(items: snapshot, searchIndex: index,
+                searchText: text, selectedState: state, selectedBrand: brand,
+                sort: sort, metadataFields: fields, locale: locale)
+            return try ItemQueryProcessor.evaluate(request)
+        }
         queryTask = worker
         Task { [weak self] in
             do {

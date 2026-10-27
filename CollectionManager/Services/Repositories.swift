@@ -6,7 +6,7 @@ extension Notification.Name {
     nonisolated static let collectionManagerLocalChanges = Notification.Name("CollectionManager.localChanges")
 }
 
-enum RepositoryFailurePoint { case fetch, save }
+nonisolated enum RepositoryFailurePoint: Sendable { case fetch, save }
 
 enum RepositoryError: LocalizedError, Sendable {
     case fetchFailed
@@ -16,9 +16,9 @@ enum RepositoryError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .fetchFailed: "The local collection store could not be read."
-        case .saveFailed: "The local collection store could not save this change."
-        case .permissionDenied: "You do not have permission to change this collection."
+        case .fetchFailed: String(localized: "The local collection store could not be read.")
+        case .saveFailed: String(localized: "The local collection store could not save this change.")
+        case .permissionDenied: String(localized: "You do not have permission to change this collection.")
         case .validation(let message): message
         }
     }
@@ -35,6 +35,24 @@ actor CollectionBackgroundRepository {
     private let container: ModelContainer
 
     init(container: ModelContainer) { self.container = container }
+
+    func importDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String)], collectionID: UUID,
+                      metadataFieldsToCreate: [MetadataFieldDefinition] = [],
+                      failureInjector: (@Sendable (RepositoryFailurePoint) throws -> Void)? = nil) throws {
+        let context = ModelContext(container)
+        let repository = CollectionRepository(context: context)
+        repository.failureInjector = failureInjector
+        try repository.importDrafts(drafts, collectionID: collectionID, metadataFieldsToCreate: metadataFieldsToCreate)
+    }
+
+    func importNewDrafts(_ drafts: [ImportDraft], collectionID: UUID, allowsDuplicates: Bool,
+                         metadataFieldsToCreate: [MetadataFieldDefinition] = [],
+                         failureInjector: (@Sendable (RepositoryFailurePoint) throws -> Void)? = nil) throws {
+        let context = ModelContext(container)
+        let repository = CollectionRepository(context: context)
+        repository.failureInjector = failureInjector
+        try repository.importNewDrafts(drafts, collectionID: collectionID, allowsDuplicates: allowsDuplicates, metadataFieldsToCreate: metadataFieldsToCreate)
+    }
 
     func items(in collectionID: UUID) throws -> [CollectionItem] {
         let context = ModelContext(container)
@@ -66,6 +84,8 @@ actor CollectionBackgroundRepository {
 
     func deleteItem(id itemID: UUID, collectionID: UUID) throws -> Bool {
         let context = ModelContext(container)
+        let writeCoordinator = StoreWriteCoordinator.forContainer(container)
+        let expected = writeCoordinator.snapshot()
         context.autosaveEnabled = false
         guard try canEdit(collectionID, context: context) else { throw RepositoryError.permissionDenied }
         // An item that is already gone from the store is a successful delete,
@@ -91,7 +111,9 @@ actor CollectionBackgroundRepository {
         context.delete(item)
         enqueue(context: context, collectionID: collectionID, itemID: itemID, recordName: itemID.uuidString, recordType: "CollectionItem", operation: "delete")
         do {
-            try context.save()
+            _ = try writeCoordinator.commit(expected: expected, changedCollections: StoreWriteCoordinator.changedCollections(in: context)) {
+                try context.save()
+            }
             NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return true
         } catch {
@@ -103,6 +125,8 @@ actor CollectionBackgroundRepository {
 
     func deleteAllItems(in collectionID: UUID) throws -> Int {
         let context = ModelContext(container)
+        let writeCoordinator = StoreWriteCoordinator.forContainer(container)
+        let expected = writeCoordinator.snapshot()
         context.autosaveEnabled = false
         guard try canEdit(collectionID, context: context) else { throw RepositoryError.permissionDenied }
         let items = (try fetch(context, FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
@@ -127,7 +151,9 @@ actor CollectionBackgroundRepository {
         }
         guard !items.isEmpty || !events.isEmpty || !ratings.isEmpty || !comments.isEmpty else { return 0 }
         do {
-            try context.save()
+            _ = try writeCoordinator.commit(expected: expected, changedCollections: StoreWriteCoordinator.changedCollections(in: context)) {
+                try context.save()
+            }
             NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return items.count
         } catch {
@@ -139,6 +165,8 @@ actor CollectionBackgroundRepository {
 
     func deleteCollection(id collectionID: UUID) throws -> Bool {
         let context = ModelContext(container)
+        let writeCoordinator = StoreWriteCoordinator.forContainer(container)
+        let expected = writeCoordinator.snapshot()
         context.autosaveEnabled = false
         let id = collectionID
         let role = (try fetch(context, FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id })).first(where: { !$0.participantID.hasPrefix("share:") })?.roleRawValue) ?? "viewer"
@@ -162,7 +190,9 @@ actor CollectionBackgroundRepository {
         context.delete(collection)
         enqueue(context: context, collectionID: id, itemID: nil, recordName: id.uuidString, recordType: "Collection", operation: "delete")
         do {
-            try context.save()
+            _ = try writeCoordinator.commit(expected: expected, changedCollections: StoreWriteCoordinator.changedCollections(in: context)) {
+                try context.save()
+            }
             NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil)
             return true
         } catch {
@@ -188,12 +218,32 @@ actor CollectionBackgroundRepository {
     }
 }
 
-@MainActor final class CollectionRepository {
+/// Each instance is confined to the executor that owns its private context.
+/// This class is deliberately not Sendable; the background actor creates its
+/// own instance and passes only immutable domain drafts across actor boundaries.
+nonisolated final class CollectionRepository {
     private let context: ModelContext
+    private let writeCoordinator: StoreWriteCoordinator
+    private var operationDepth = 0
+    private var operationSnapshot: StoreWriteCoordinator.Snapshot?
     var failureInjector: ((RepositoryFailurePoint) throws -> Void)?
     private(set) var lastPersistenceError: RepositoryError?
-    init(context: ModelContext) { self.context = context; context.autosaveEnabled = false }
-    func collections() throws -> [CollectionModel] {
+    init(context: ModelContext) {
+        self.context = context
+        writeCoordinator = StoreWriteCoordinator.forContainer(context.container)
+        context.autosaveEnabled = false
+    }
+
+    private func beginOperation() {
+        if operationDepth == 0 { operationSnapshot = writeCoordinator.snapshot() }
+        operationDepth += 1
+    }
+
+    private func endOperation() {
+        operationDepth -= 1
+        if operationDepth == 0 { operationSnapshot = nil }
+    }
+    func collections() throws -> [CollectionModel] { beginOperation(); defer { endOperation() };
         let records = (try fetch(FetchDescriptor<CollectionRecord>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])))
         let members = (try fetch(FetchDescriptor<CollectionMemberRecord>()))
         var roles: [UUID: CollectionMemberRole] = [:]
@@ -227,7 +277,7 @@ actor CollectionBackgroundRepository {
         guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
         return (try? JSONDecoder().decode(CollectionSettingsPayload.self, from: Data(record.settingsJSON.utf8)))?.mergedTags ?? []
     }
-    func items(in collectionID: UUID) throws -> [CollectionItem] {
+    func items(in collectionID: UUID) throws -> [CollectionItem] { beginOperation(); defer { endOperation() };
         let descriptor = FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
         let records = (try fetch(descriptor))
         let ratingRecords = (try fetch(FetchDescriptor<ItemRatingRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
@@ -242,7 +292,7 @@ actor CollectionBackgroundRepository {
         }
         return items
     }
-    func item(id itemID: UUID, in collectionID: UUID? = nil) throws -> CollectionItem? {
+    func item(id itemID: UUID, in collectionID: UUID? = nil) throws -> CollectionItem? { beginOperation(); defer { endOperation() };
         guard let record = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return nil }
         if let collectionID, record.collectionID != collectionID { return nil }
         var item = record.domain
@@ -250,8 +300,8 @@ actor CollectionBackgroundRepository {
         item.comments = ((try fetch(FetchDescriptor<ItemCommentRecord>(predicate: #Predicate { $0.itemID == itemID }, sortBy: [SortDescriptor(\.createdAt)])))).map(\.domain)
         return item
     }
-    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) throws { let record = CollectionRecord(name: name, icon: icon, subtitle: subtitle, settingsJSON: (try? String(data: JSONEncoder().encode(CollectionSettingsPayload(category: category)), encoding: .utf8)) ?? "{}"); context.insert(record); context.insert(CollectionMemberRecord(collectionID: record.id, participantID: "local", role: .owner)); enqueue(collectionID: record.id, recordName: record.id.uuidString, recordType: "Collection", operation: "createCollection"); try save() }
-    func deleteCollection(_ collection: CollectionModel) throws {
+    func addCollection(name: String, icon: String, subtitle: String, category: CollectionCategory = .custom) throws { beginOperation(); defer { endOperation() }; let record = CollectionRecord(name: name, icon: icon, subtitle: subtitle, settingsJSON: (try? String(data: JSONEncoder().encode(CollectionSettingsPayload(category: category)), encoding: .utf8)) ?? "{}"); context.insert(record); context.insert(CollectionMemberRecord(collectionID: record.id, participantID: "local", role: .owner)); enqueue(collectionID: record.id, recordName: record.id.uuidString, recordType: "Collection", operation: "createCollection"); try save() }
+    func deleteCollection(_ collection: CollectionModel) throws { beginOperation(); defer { endOperation() };
         guard try role(for: collection.id).canDelete else { throw RepositoryError.permissionDenied }
         let collectionID = collection.id
         guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first else { return }
@@ -268,7 +318,7 @@ actor CollectionBackgroundRepository {
         context.delete(record)
         try save()
     }
-    func updateCollection(_ collection: CollectionModel) throws {
+    func updateCollection(_ collection: CollectionModel) throws { beginOperation(); defer { endOperation() };
         guard try role(for: collection.id).canEdit else { throw RepositoryError.permissionDenied }
         let collectionID = collection.id
         guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first else { return }
@@ -292,7 +342,7 @@ actor CollectionBackgroundRepository {
         try save()
     }
     @discardableResult
-    func addItem(_ item: CollectionItem, allowsDuplicates: Bool = false) throws -> Bool {
+    func addItem(_ item: CollectionItem, allowsDuplicates: Bool = false) throws -> Bool { beginOperation(); defer { endOperation() };
         guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let collectionID = item.collectionID
         if !allowsDuplicates {
@@ -310,40 +360,63 @@ actor CollectionBackgroundRepository {
         enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
         return try save()
     }
-    func webSyncs(for collectionID: UUID) throws -> [WebSyncRecord] { (try fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.urlString)]))) }
-    func collectionName(for collectionID: UUID) throws -> String {
+    func webSyncs(for collectionID: UUID) throws -> [WebSyncRecord] { beginOperation(); defer { endOperation() }; return (try fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.urlString)]))) }
+    func collectionName(for collectionID: UUID) throws -> String { beginOperation(); defer { endOperation() };
         let id = collectionID
         return (try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first?.name) ?? "Collection"
     }
-    func metadataFields(for collectionID: UUID) throws -> [MetadataFieldDefinition] {
+    func metadataFields(for collectionID: UUID) throws -> [MetadataFieldDefinition] { beginOperation(); defer { endOperation() };
         let id = collectionID
         guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
         return model(from: record).metadataFields
     }
-    func statuses(for collectionID: UUID) throws -> [CollectionStatus] {
+    func statuses(for collectionID: UUID) throws -> [CollectionStatus] { beginOperation(); defer { endOperation() };
         let id = collectionID
         guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { return [] }
         return model(from: record).statuses
     }
-    func addWebSync(_ sync: WebSyncRecord) throws { guard try role(for: sync.collectionID).canEdit else { throw RepositoryError.permissionDenied }; context.insert(sync); try save() }
-    func updateWebSync(_ sync: WebSyncRecord) throws { guard try role(for: sync.collectionID).canEdit else { context.rollback(); throw RepositoryError.permissionDenied }; try save() }
-    func deleteWebSync(_ sync: WebSyncRecord) throws { guard try role(for: sync.collectionID).canEdit else { throw RepositoryError.permissionDenied }; context.delete(sync); try save() }
-    func setWebSync(_ sync: WebSyncRecord, lastSyncAt: Date?, error: String?) throws { sync.lastSyncAt = lastSyncAt; sync.lastError = error; try save() }
-    func hasImportedItem(collectionID: UUID, sourceKey: String) throws -> Bool {
+    func addWebSync(_ sync: WebSyncRecord, metadataFieldsToCreate: [MetadataFieldDefinition] = []) throws {
+        beginOperation(); defer { endOperation() }
+        defer { if context.hasChanges { context.rollback() } }
+        guard try role(for: sync.collectionID).canEdit else { throw RepositoryError.permissionDenied }
+        let settings = try collectionSettings(for: sync.collectionID)
+        try stageMetadataFields(metadataFieldsToCreate, in: settings)
+        context.insert(sync)
+        try save()
+    }
+
+    func updateWebSync(_ sync: WebSyncRecord, metadataFieldsToCreate: [MetadataFieldDefinition] = [], update: (WebSyncRecord) throws -> Void) throws {
+        beginOperation(); defer { endOperation() }
+        defer { if context.hasChanges { context.rollback() } }
+        let recordID = sync.id
+        guard let stored = try fetch(FetchDescriptor<WebSyncRecord>(predicate: #Predicate { $0.id == recordID })).first else { throw RepositoryError.saveFailed }
+        let collectionID = stored.collectionID
+        guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
+        let settings = try collectionSettings(for: collectionID)
+        // The caller supplies values, not a model already changed before this
+        // operation's snapshot/authority check. A throwing closure rolls back.
+        try update(stored)
+        guard stored.id == recordID && stored.collectionID == collectionID else { throw RepositoryError.permissionDenied }
+        try stageMetadataFields(metadataFieldsToCreate, in: settings)
+        try save()
+    }
+    func deleteWebSync(_ sync: WebSyncRecord) throws { beginOperation(); defer { endOperation() }; guard try role(for: sync.collectionID).canEdit else { throw RepositoryError.permissionDenied }; context.delete(sync); try save() }
+    func setWebSync(_ sync: WebSyncRecord, lastSyncAt: Date?, error: String?) throws { beginOperation(); defer { endOperation() }; sync.lastSyncAt = lastSyncAt; sync.lastError = error; try save() }
+    func hasImportedItem(collectionID: UUID, sourceKey: String) throws -> Bool { beginOperation(); defer { endOperation() };
         let normalizedSource = importSourceIdentity(sourceKey)
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         return records.contains { $0.importSourceKey.map(importSourceIdentity) == normalizedSource }
     }
-    func importedSourceKeys(in collectionID: UUID) throws -> Set<String> {
+    func importedSourceKeys(in collectionID: UUID) throws -> Set<String> { beginOperation(); defer { endOperation() };
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         return Set(records.compactMap(\.importSourceKey).map(importSourceIdentity))
     }
-    func importDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String) throws -> Bool {
+    func importDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String) throws -> Bool { beginOperation(); defer { endOperation() };
         let before = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })).count
         try importDrafts([(draft: draft, sourceKey: sourceKey)], collectionID: collectionID)
         return try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })).count > before
     }
-    func importDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String)], collectionID: UUID) throws {
+    func importDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String)], collectionID: UUID, metadataFieldsToCreate: [MetadataFieldDefinition] = []) throws { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !drafts.isEmpty else { return }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let settings = try collectionSettings(for: collectionID)
@@ -352,10 +425,11 @@ actor CollectionBackgroundRepository {
             for entry in drafts {
                 let identity = importIdentity(title: entry.draft.title, brand: entry.draft.brand, variant: entry.draft.variant)
                 let existing = records.first { $0.importSourceKey.map(importSourceIdentity) == importSourceIdentity(entry.sourceKey) || importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity }
-                guard entry.draft.barcode != nil || existing?.barcodeValue != nil else { throw RepositoryError.validation("This collection requires a barcode for every item.") }
+                guard entry.draft.barcode != nil || existing?.barcodeValue != nil else { throw RepositoryError.validation(String(localized: "This collection requires a barcode for every item.")) }
             }
         }
         let rules = try mergedTags(for: collectionID)
+        try stageMetadataFields(metadataFieldsToCreate, in: settings)
         var bySource: [String: ItemRecord] = [:]
         for record in records {
             if let sourceKey = record.importSourceKey.map(importSourceIdentity), bySource[sourceKey] == nil { bySource[sourceKey] = record }
@@ -387,14 +461,17 @@ actor CollectionBackgroundRepository {
         try save()
     }
     /// New-item imports preserve the review's duplicate policy in one commit.
-    func importNewDrafts(_ drafts: [ImportDraft], collectionID: UUID, allowsDuplicates: Bool) throws {
+    func importNewDrafts(_ drafts: [ImportDraft], collectionID: UUID, allowsDuplicates: Bool, metadataFieldsToCreate: [MetadataFieldDefinition] = []) throws { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let settings = try collectionSettings(for: collectionID)
         for draft in drafts {
             try validatePayload(metadata: draft.metadata)
-            try validateCreation(barcode: draft.barcode, collectionID: collectionID)
+            if settings.barcodeRequired && draft.barcode == nil {
+                throw RepositoryError.validation(String(localized: "This collection requires a barcode for every item."))
+            }
         }
         let rules = try mergedTags(for: collectionID)
+        try stageMetadataFields(metadataFieldsToCreate, in: settings)
         var identities: Set<String> = []
         if !allowsDuplicates {
             identities = Set(try items(in: collectionID).map { importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) })
@@ -411,7 +488,7 @@ actor CollectionBackgroundRepository {
         try save()
     }
 
-    func deduplicateItems(in collectionID: UUID) throws -> Int {
+    func deduplicateItems(in collectionID: UUID) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])))
         var seenSources = Set<String>()
@@ -449,14 +526,14 @@ actor CollectionBackgroundRepository {
         try save()
         return duplicateIDs.count
     }
-    func deleteAllImportedItems(in collectionID: UUID) throws -> Int {
+    func deleteAllImportedItems(in collectionID: UUID) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let imported = records.filter { !($0.importSourceKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
         for record in imported { context.delete(record); enqueue(collectionID: collectionID, recordName: record.id.uuidString, recordType: "CollectionItem", operation: "delete") }
         if !imported.isEmpty { try save() }; return imported.count
     }
-    func applyTagRules(_ options: TagGenerationOptions, in collectionID: UUID) throws -> Int {
+    func applyTagRules(_ options: TagGenerationOptions, in collectionID: UUID) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         var changed = 0
@@ -471,7 +548,7 @@ actor CollectionBackgroundRepository {
         if changed > 0 { try save() }
         return changed
     }
-    func applyMergedTags(in collectionID: UUID) throws -> Int {
+    func applyMergedTags(in collectionID: UUID) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let rules = try mergedTags(for: collectionID)
@@ -486,10 +563,10 @@ actor CollectionBackgroundRepository {
         if changed > 0 { try save() }
         return changed
     }
-    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) throws -> Bool {
-        try applyWebDrafts([(draft: draft, sourceKey: sourceKey, updateExistingState: updateExistingState)], collectionID: collectionID).added > 0
+    func applyWebDraft(_ draft: ImportDraft, collectionID: UUID, sourceKey: String, updateExistingState: Bool) throws -> Bool { beginOperation(); defer { endOperation() };
+        return try applyWebDrafts([(draft: draft, sourceKey: sourceKey, updateExistingState: updateExistingState)], collectionID: collectionID).added > 0
     }
-    func applyWebDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)], collectionID: UUID) throws -> WebSyncApplyResult {
+    func applyWebDrafts(_ drafts: [(draft: ImportDraft, sourceKey: String, updateExistingState: Bool)], collectionID: UUID) throws -> WebSyncApplyResult { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !drafts.isEmpty else { return WebSyncApplyResult() }
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let settings = try collectionSettings(for: collectionID)
@@ -498,7 +575,7 @@ actor CollectionBackgroundRepository {
             for entry in drafts {
                 let identity = importIdentity(title: entry.draft.title, brand: entry.draft.brand, variant: entry.draft.variant)
                 let existing = records.first { $0.importSourceKey.map(importSourceIdentity) == importSourceIdentity(entry.sourceKey) || importIdentity(title: $0.title, brand: $0.brand, variant: $0.variant) == identity }
-                guard entry.draft.barcode != nil || existing?.barcodeValue != nil else { throw RepositoryError.validation("This collection requires a barcode for every item.") }
+                guard entry.draft.barcode != nil || existing?.barcodeValue != nil else { throw RepositoryError.validation(String(localized: "This collection requires a barcode for every item.")) }
             }
         }
         let rules = try mergedTags(for: collectionID)
@@ -545,7 +622,7 @@ actor CollectionBackgroundRepository {
         try save()
         return WebSyncApplyResult(added: added, updated: updated, addedItems: addedItems, matchedStateChanges: matchedStateChanges)
     }
-    func updateItem(_ item: CollectionItem, previousState: ItemState? = nil) throws {
+    func updateItem(_ item: CollectionItem, previousState: ItemState? = nil) throws { beginOperation(); defer { endOperation() };
         guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let record = try requireItem(item.id, in: item.collectionID)
         try validatePayload(metadata: item.metadata, dates: [item.createdAt, item.updatedAt] + Array(item.dateTags.values) + [item.consumedAt].compactMap { $0 }, sourceSnapshot: item.sourceSnapshot)
@@ -557,7 +634,7 @@ actor CollectionBackgroundRepository {
         enqueue(collectionID: item.collectionID, recordName: item.id.uuidString, recordType: "CollectionItem")
         try save()
     }
-    @discardableResult func bulkUpdateState(for itemIDs: Set<UUID>, in collectionID: UUID, to state: ItemState) throws -> Int {
+    @discardableResult func bulkUpdateState(for itemIDs: Set<UUID>, in collectionID: UUID, to state: ItemState) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }; guard !itemIDs.isEmpty else { return 0 }
         let state = normalizedState(state, settings: try collectionSettings(for: collectionID))
         let records = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
@@ -577,7 +654,7 @@ actor CollectionBackgroundRepository {
         if changed > 0 { try save() }
         return changed
     }
-    func setRating(for item: CollectionItem, value: Int?, participant: CollaboratorIdentity) throws {
+    func setRating(for item: CollectionItem, value: Int?, participant: CollaboratorIdentity) throws { beginOperation(); defer { endOperation() };
         guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
         _ = try requireItem(item.id, in: item.collectionID)
         let itemID = item.id; let participantID = participant.id
@@ -593,7 +670,7 @@ actor CollectionBackgroundRepository {
         }
         try save()
     }
-    @discardableResult func addComment(to item: CollectionItem, text: String, participant: CollaboratorIdentity) throws -> ItemComment? {
+    @discardableResult func addComment(to item: CollectionItem, text: String, participant: CollaboratorIdentity) throws -> ItemComment? { beginOperation(); defer { endOperation() };
         guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
         _ = try requireItem(item.id, in: item.collectionID)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -604,7 +681,7 @@ actor CollectionBackgroundRepository {
         try save()
         return record.domain
     }
-    func deleteItem(_ item: CollectionItem) throws {
+    func deleteItem(_ item: CollectionItem) throws { beginOperation(); defer { endOperation() };
         guard try role(for: item.collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let itemID = item.id
         guard let record = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { return }
@@ -613,7 +690,7 @@ actor CollectionBackgroundRepository {
         context.delete(record)
         try save()
     }
-    func deleteAllItems(in collectionID: UUID) throws -> Int {
+    func deleteAllItems(in collectionID: UUID) throws -> Int { beginOperation(); defer { endOperation() };
         guard try role(for: collectionID).canEdit else { throw RepositoryError.permissionDenied }
         let items = (try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
         let events = (try fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == collectionID })))
@@ -626,20 +703,20 @@ actor CollectionBackgroundRepository {
         if !items.isEmpty || !events.isEmpty { try save() }
         return items.count
     }
-    func events(for item: CollectionItem) throws -> [ItemEvent] { let itemID = item.id; let d = FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == itemID }, sortBy: [SortDescriptor(\.timestamp, order: .reverse)]); return (try fetch(d)).map { ItemEvent(id: $0.id, itemID: $0.itemID, timestamp: $0.timestamp, type: $0.type, note: $0.note) } }
-    func events(in collectionID: UUID) throws -> [ItemEvent] { let id = collectionID; let d = FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == id }, sortBy: [SortDescriptor(\.timestamp)]); return (try fetch(d)).map { ItemEvent(id: $0.id, itemID: $0.itemID, timestamp: $0.timestamp, type: $0.type, note: $0.note) } }
-    func role(for collectionID: UUID) throws -> CollectionMemberRole { let id = collectionID; return try fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id })).first(where: { !$0.participantID.hasPrefix("share:") })?.role ?? .viewer }
-    func pendingMutations() throws -> [SyncMutationRecord] { (try fetch(FetchDescriptor<SyncMutationRecord>(sortBy: [SortDescriptor(\.createdAt)]))) }
-    func markMutation(_ mutation: SyncMutationRecord, error: Error? = nil) throws { mutation.attempts += 1; mutation.lastError = error?.localizedDescription; try save() }
-    func removeMutation(_ mutation: SyncMutationRecord) throws { context.delete(mutation); try save() }
-    func removeMutations(_ mutations: [SyncMutationRecord]) throws { mutations.forEach(context.delete); if !mutations.isEmpty { try save() } }
-    func markMutations(_ mutations: [SyncMutationRecord], error: Error) throws { for mutation in mutations { mutation.attempts += 1; mutation.lastError = error.localizedDescription }; if !mutations.isEmpty { try save() } }
-    func removeMutations(withIDs ids: Set<UUID>) throws { let records = try pendingMutations().filter { ids.contains($0.id) }; records.forEach(context.delete); if !records.isEmpty { try save() } }
-    func markMutations(withIDs ids: Set<UUID>, error: Error) throws { let records = try pendingMutations().filter { ids.contains($0.id) }; for record in records { record.attempts += 1; record.lastError = error.localizedDescription }; if !records.isEmpty { try save() } }
-    func setSyncState(collectionID: UUID, state: CollectionSyncState, error: String? = nil, lastSyncedAt: Date? = nil) throws { let id = collectionID; let record: CloudSyncStateRecord; if let existing = try fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first { record = existing } else { record = CloudSyncStateRecord(collectionID: id); context.insert(record) }; record.state = state; record.lastError = error; if let lastSyncedAt { record.lastSyncedAt = lastSyncedAt }; record.pendingCount = try pendingMutations().filter { $0.collectionID == id }.count; try save() }
-    func syncState(for collectionID: UUID) throws -> (CollectionSyncState, String?, Int) { let id = collectionID; guard let state = try fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first else { return (.idle, nil, 0) }; return (state.state, state.lastError, state.pendingCount) }
+    func events(for item: CollectionItem) throws -> [ItemEvent] { beginOperation(); defer { endOperation() }; let itemID = item.id; let d = FetchDescriptor<EventRecord>(predicate: #Predicate { $0.itemID == itemID }, sortBy: [SortDescriptor(\.timestamp, order: .reverse)]); return (try fetch(d)).map { ItemEvent(id: $0.id, itemID: $0.itemID, timestamp: $0.timestamp, type: $0.type, note: $0.note) } }
+    func events(in collectionID: UUID) throws -> [ItemEvent] { beginOperation(); defer { endOperation() }; let id = collectionID; let d = FetchDescriptor<EventRecord>(predicate: #Predicate { $0.collectionID == id }, sortBy: [SortDescriptor(\.timestamp)]); return (try fetch(d)).map { ItemEvent(id: $0.id, itemID: $0.itemID, timestamp: $0.timestamp, type: $0.type, note: $0.note) } }
+    func role(for collectionID: UUID) throws -> CollectionMemberRole { beginOperation(); defer { endOperation() }; let id = collectionID; return try fetch(FetchDescriptor<CollectionMemberRecord>(predicate: #Predicate { $0.collectionID == id })).first(where: { !$0.participantID.hasPrefix("share:") })?.role ?? .viewer }
+    func pendingMutations() throws -> [SyncMutationRecord] { beginOperation(); defer { endOperation() }; return (try fetch(FetchDescriptor<SyncMutationRecord>(sortBy: [SortDescriptor(\.createdAt)]))) }
+    func markMutation(_ mutation: SyncMutationRecord, error: Error? = nil) throws { beginOperation(); defer { endOperation() }; mutation.attempts += 1; mutation.lastError = error?.localizedDescription; try save() }
+    func removeMutation(_ mutation: SyncMutationRecord) throws { beginOperation(); defer { endOperation() }; context.delete(mutation); try save() }
+    func removeMutations(_ mutations: [SyncMutationRecord]) throws { beginOperation(); defer { endOperation() }; mutations.forEach(context.delete); if !mutations.isEmpty { try save() } }
+    func markMutations(_ mutations: [SyncMutationRecord], error: Error) throws { beginOperation(); defer { endOperation() }; for mutation in mutations { mutation.attempts += 1; mutation.lastError = error.localizedDescription }; if !mutations.isEmpty { try save() } }
+    func removeMutations(withIDs ids: Set<UUID>) throws { beginOperation(); defer { endOperation() }; let records = try pendingMutations().filter { ids.contains($0.id) }; records.forEach(context.delete); if !records.isEmpty { try save() } }
+    func markMutations(withIDs ids: Set<UUID>, error: Error) throws { beginOperation(); defer { endOperation() }; let records = try pendingMutations().filter { ids.contains($0.id) }; for record in records { record.attempts += 1; record.lastError = error.localizedDescription }; if !records.isEmpty { try save() } }
+    func setSyncState(collectionID: UUID, state: CollectionSyncState, error: String? = nil, lastSyncedAt: Date? = nil) throws { beginOperation(); defer { endOperation() }; let id = collectionID; let record: CloudSyncStateRecord; if let existing = try fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first { record = existing } else { record = CloudSyncStateRecord(collectionID: id); context.insert(record) }; record.state = state; record.lastError = error; if let lastSyncedAt { record.lastSyncedAt = lastSyncedAt }; record.pendingCount = try pendingMutations().filter { $0.collectionID == id }.count; try save() }
+    func syncState(for collectionID: UUID) throws -> (CollectionSyncState, String?, Int) { beginOperation(); defer { endOperation() }; let id = collectionID; guard let state = try fetch(FetchDescriptor<CloudSyncStateRecord>(predicate: #Predicate { $0.collectionID == id })).first else { return (.idle, nil, 0) }; return (state.state, state.lastError, state.pendingCount) }
     @discardableResult
-    func merge(_ snapshots: [CloudCollectionSnapshot]) throws -> CloudMergeNotificationChanges {
+    func merge(_ snapshots: [CloudCollectionSnapshot]) throws -> CloudMergeNotificationChanges { beginOperation(); defer { endOperation() };
         var notificationChanges = CloudMergeNotificationChanges()
         // A snapshot is fetched from CloudKit, so it still contains everything
         // that has been deleted locally but not pushed yet — either because the
@@ -812,15 +889,31 @@ actor CollectionBackgroundRepository {
     }
 
     private func requireItem(_ itemID: UUID, in collectionID: UUID) throws -> ItemRecord {
-        guard let record = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { throw RepositoryError.validation("This item is no longer available.") }
+        guard let record = try fetch(FetchDescriptor<ItemRecord>(predicate: #Predicate { $0.id == itemID })).first else { throw RepositoryError.validation(String(localized: "This item is no longer available.")) }
         guard record.collectionID == collectionID else { throw RepositoryError.permissionDenied }
         return record
     }
 
     private func collectionSettings(for collectionID: UUID) throws -> CollectionModel {
         let id = collectionID
-        guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { throw RepositoryError.validation("This collection is no longer available.") }
+        guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == id })).first else { throw RepositoryError.validation(String(localized: "This collection is no longer available.")) }
         return model(from: record)
+    }
+
+    private func stageMetadataFields(_ fields: [MetadataFieldDefinition], in settings: CollectionModel) throws {
+        guard !fields.isEmpty else { return }
+        var metadataFields = settings.metadataFields
+        var knownIDs = Set(metadataFields.map(\.id))
+        for field in fields where knownIDs.insert(field.id).inserted { metadataFields.append(field) }
+        guard metadataFields != settings.metadataFields else { return }
+        let collectionID = settings.id
+        guard let record = try fetch(FetchDescriptor<CollectionRecord>(predicate: #Predicate { $0.id == collectionID })).first else { throw RepositoryError.saveFailed }
+        let payload = CollectionSettingsPayload(category: settings.category, statuses: settings.statuses, mergedTags: settings.mergedTags,
+            metadataFields: metadataFields, defaultStatusID: settings.defaultStatusID, barcodeRequired: settings.barcodeRequired)
+        let data = try JSONEncoder().encode(payload)
+        guard let encoded = String(data: data, encoding: .utf8) else { throw RepositoryError.saveFailed }
+        record.settingsJSON = encoded
+        record.updatedAt = .now
     }
 
     private func normalizedState(_ state: ItemState, wasExplicit: Bool = true, settings: CollectionModel) -> ItemState {
@@ -838,12 +931,12 @@ actor CollectionBackgroundRepository {
             _ = try encoder.encode(dates)
             if let sourceSnapshot { _ = try encoder.encode(sourceSnapshot) }
         } catch {
-            throw RepositoryError.validation("This item contains a number or date that cannot be saved. Correct its metadata and try again.")
+            throw RepositoryError.validation(String(localized: "This item contains a number or date that cannot be saved. Correct its metadata and try again."))
         }
     }
 
     private func validateCreation(barcode: Barcode?, collectionID: UUID) throws {
-        guard !(try collectionSettings(for: collectionID)).barcodeRequired || barcode != nil else { throw RepositoryError.validation("This collection requires a barcode for every item.") }
+        guard !(try collectionSettings(for: collectionID)).barcodeRequired || barcode != nil else { throw RepositoryError.validation(String(localized: "This collection requires a barcode for every item.")) }
     }
 
     private func journalContextChanges() throws {
@@ -873,7 +966,15 @@ actor CollectionBackgroundRepository {
             if journaling { try journalContextChanges() }
             let hasNewOutgoingIntent = context.insertedModelsArray.contains { $0 is SyncMutationRecord }
             try failureInjector?(.save)
-            try context.save()
+            let changed = StoreWriteCoordinator.changedCollections(in: context)
+            let committed = try writeCoordinator.commit(expected: operationSnapshot, changedCollections: changed) {
+                try context.save()
+            }
+            // Keep the original snapshot for untouched scopes: refreshing it
+            // wholesale could accidentally bless stale reads in another scope.
+            if operationSnapshot != nil {
+                for collection in changed { operationSnapshot?[collection] = committed[collection, default: 0] }
+            }
             if journaling && hasNewOutgoingIntent { NotificationCenter.default.post(name: .collectionManagerLocalChanges, object: nil) }
             lastPersistenceError = nil
             return true

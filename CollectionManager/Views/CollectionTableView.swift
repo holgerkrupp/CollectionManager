@@ -15,6 +15,7 @@ struct CollectionTableView: View {
     // The filter bar and the column headers are two ways to order the same
     // rows, so whichever the user touched last wins.
     @State private var usesColumnSort = false
+    @State private var sortedRowsCache: CollectionTableSortCache?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -31,11 +32,38 @@ struct CollectionTableView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
         .onChange(of: sortOrder) { _, _ in usesColumnSort = true }
         .onChange(of: store.itemSort) { _, _ in usesColumnSort = false }
+        .task(id: sortIdentity) {
+            let identity = sortIdentity
+            guard !Task.isCancelled else { return }
+            guard identity.usesColumnSort else { sortedRowsCache = nil; return }
+            let snapshot = store.visibleItems
+            let worker = Task.detached(priority: .userInitiated) {
+                try CollectionTableSort.sorted(snapshot, using: identity.sortOrder)
+            }
+            do {
+                let sorted = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled, sortIdentity == identity else { return }
+                sortedRowsCache = CollectionTableSortCache(identity: identity, sortedRows: sorted)
+            } catch {
+                // The current store rows remain visible until a current header
+                // sort completes. Canceled/obsolete work never publishes rows.
+            }
+        }
         // The AppStore-owned session outlives either adaptive representation.
     }
 
+    private var sortIdentity: CollectionTableSortIdentity {
+        CollectionTableSortIdentity(visibleItemsRevision: store.visibleItemsRevision,
+                                    sortOrder: sortOrder, usesColumnSort: usesColumnSort,
+                                    collectionID: editSession.collectionID)
+    }
+
     private var rows: [CollectionItem] {
-        usesColumnSort ? store.visibleItems.sorted(using: sortOrder) : store.visibleItems
+        sortedRowsCache?.rows(for: sortIdentity, fallback: store.visibleItems) ?? store.visibleItems
     }
 
     // MARK: - Table
@@ -95,7 +123,7 @@ struct CollectionTableView: View {
 
     private var editingBar: some View {
         HStack(spacing: 12) {
-            Label("\(rows.count) row\(rows.count == 1 ? "" : "s")", systemImage: "tablecells")
+            Label("Rows: \(rows.count)", systemImage: "tablecells")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if !canEdit {
@@ -127,7 +155,7 @@ struct CollectionTableView: View {
                 .help("Set one status for all selected rows")
             }
             if pendingChangeCount > 0 {
-                Text("\(pendingChangeCount) unsaved change\(pendingChangeCount == 1 ? "" : "s")")
+                Text("Unsaved changes: \(pendingChangeCount)")
                     .font(.subheadline)
                     .foregroundStyle(.orange)
                 Button("Revert") { editSession.revert() }

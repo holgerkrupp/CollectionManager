@@ -8,7 +8,7 @@ struct RootView: View {
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
-    @AppStorage("onboarding.hasCompleted") private var onboardingCompleted = false
+    @AppStorage("onboarding.hasCompleted", store: ApplicationPreferences.defaults) private var onboardingCompleted = false
     @State private var showingNewCollection = false
     #if os(iOS)
     @State private var showingSettings = false
@@ -36,7 +36,7 @@ struct RootView: View {
         } detail: { if store.selectedCollection != nil { CollectionDetailView() } else { ContentUnavailableView("No collections yet", systemImage: "square.stack.3d.up", description: Text("Create your first collection to get started.")) } }
         .alert("Library update failed", isPresented: Binding(get: { store.persistenceError != nil }, set: { if !$0 { store.persistenceError = nil } })) {
             Button("OK") { store.persistenceError = nil }
-        } message: { Text(store.persistenceError ?? "Your library could not save this change.") }
+        } message: { Text(store.persistenceError ?? String(localized: "Your library could not save this change.")) }
         .sheet(isPresented: $showingNewCollection) { NewCollectionView() }
         #if os(iOS)
         .sheet(isPresented: $showingSettings) { SettingsView() }

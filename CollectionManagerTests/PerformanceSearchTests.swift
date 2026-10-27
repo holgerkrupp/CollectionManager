@@ -23,6 +23,16 @@ import SwiftData
         }
     }
 
+    func testLocalizedNumericDisplayKeepsCanonicalNumericSearch() {
+        var item = CollectionPerformanceFixture.items(count: 1, collectionID: UUID())[0]
+        item.metadata = ["count": .integer(1234), "price": .decimal(5678.5)]
+        let german = ItemSearchIndex.searchableText(for: item, locale: Locale(identifier: "de_DE"))
+        for query in ["1.234", "5.678,5", "1234", "5678.5"] { XCTAssertTrue(german.contains(query)) }
+        let index = ItemSearchIndex(items: [item])
+        XCTAssertTrue(index.matches(itemID: item.id, normalizedQuery: "1234"))
+        XCTAssertTrue(index.matches(itemID: item.id, normalizedQuery: "5678.5"))
+    }
+
     func testRebuildRemovesDeletedRowsAndUpdatesChangedMetadata() {
         let id = UUID()
         var items = CollectionPerformanceFixture.items(count: 2, collectionID: id)

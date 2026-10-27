@@ -57,7 +57,7 @@ struct ItemCard: View {
                     ItemMetadataSummary(item: item, fields: rowMetadataFields)
                 }
                 if !item.ratings.isEmpty { RatingSummary(ratings: item.ratings) }
-                if !item.comments.isEmpty { Label("\(item.comments.count) collaborator comment\(item.comments.count == 1 ? "" : "s")", systemImage: "text.bubble").font(.caption).foregroundStyle(.secondary) }
+                if !item.comments.isEmpty { Label("Comments: \(item.comments.count)", systemImage: "text.bubble").font(.caption).foregroundStyle(.secondary) }
             }
         }
         .padding(14)
@@ -145,7 +145,7 @@ private struct RatingSummary: View {
     let ratings: [ItemRating]
     var body: some View {
         let average = Double(ratings.map(\.value).reduce(0, +)) / Double(ratings.count)
-        Label("\(average, specifier: "%.1f") / 5 · \(ratings.count) rating\(ratings.count == 1 ? "" : "s")", systemImage: "star.fill")
+        Label("Average: \(average, specifier: "%.1f") / 5 · Ratings: \(ratings.count)", systemImage: "star.fill")
             .font(.caption)
             .foregroundStyle(.orange)
     }
@@ -255,7 +255,7 @@ private struct ProductNameLookupControl: View {
     var body: some View {
         Button { search() } label: {
             HStack {
-                Label(isSearching ? "Searching products…" : "Find Product Details by Name", systemImage: "text.magnifyingglass")
+                Label(isSearching ? String(localized: "Searching products…") : String(localized: "Find Product Details by Name"), systemImage: "text.magnifyingglass")
                 Spacer()
                 if isSearching { ProgressView().controlSize(.small) }
             }
@@ -268,7 +268,7 @@ private struct ProductNameLookupControl: View {
             .sheet(isPresented: $showingResults) {
                 ProductNameSearchResultsView(query: trimmedQuery, products: results) { product in
                     onSelect(product)
-                    message = "Product details applied. Review them before saving."
+                    message = String(localized: "Product details applied. Review them before saving.")
                 }
             }
             .onDisappear { searchTask?.cancel() }
@@ -288,13 +288,13 @@ private struct ProductNameLookupControl: View {
                 guard !Task.isCancelled else { return }
                 results = products
                 if products.isEmpty {
-                    message = "No matching products were found. Try including the brand or expression."
+                    message = String(localized: "No matching products were found. Try including the brand or expression.")
                 } else {
                     showingResults = true
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                message = "\(error.localizedDescription) Try again later or enter the details manually."
+                message = String(localized: "\(error.localizedDescription) Try again later or enter the details manually.")
             }
             guard !Task.isCancelled else { return }
             isSearching = false
@@ -405,7 +405,7 @@ struct AddItemView: View {
                             if let barcode { lookup(barcode) }
                         } label: {
                             HStack {
-                                Label(isLookingUp ? "Looking up product…" : "Look Up Product", systemImage: "magnifyingglass")
+                                Label(isLookingUp ? String(localized: "Looking up product…") : String(localized: "Look Up Product"), systemImage: "magnifyingglass")
                                 Spacer()
                                 if isLookingUp {
                                     ProgressView()
@@ -419,7 +419,7 @@ struct AddItemView: View {
                     if let barcode {
                         if let status = store.barcodeStatus(barcode) {
                             let configuredStatus = store.status(for: status)
-                            Label(status == .consumed ? "Already consumed in this collection" : status == .stored ? "Currently in storage" : "Already in collection: \(configuredStatus.name)", systemImage: configuredStatus.symbol)
+                            Label(status == .consumed ? String(localized: "Already consumed in this collection") : status == .stored ? String(localized: "Currently in storage") : String(localized: "Already in collection: \(configuredStatus.name)"), systemImage: configuredStatus.symbol)
                                 .foregroundStyle(configuredStatus.color.color)
                         }
                     }
@@ -591,7 +591,7 @@ struct AddItemView: View {
         case .petFood: provider = OpenFactsProvider(host: "world.openpetfoodfacts.org")
         case .products: provider = OpenFactsProvider(host: "world.openproductsfacts.org")
         default:
-            lookupMessage = "Product lookup is not configured for this collection category yet."
+            lookupMessage = String(localized: "Product lookup is not configured for this collection category yet.")
             return
         }
 
@@ -641,15 +641,15 @@ struct AddItemView: View {
                     }
                     lookupSuggestions = appliedSuggestions
                     productMatches = store.productMatches(for: value, productName: product.title)
-                    lookupMessage = "Product data found. Review the suggested details before saving."
+                    lookupMessage = String(localized: "Product data found. Review the suggested details before saving.")
                 } else {
                     productMatches = store.productMatches(for: value)
-                    lookupMessage = "No product was found. You can still enter the item manually."
+                    lookupMessage = String(localized: "No product was found. You can still enter the item manually.")
                 }
             } catch {
                 guard !Task.isCancelled, barcode == value else { return }
                 productMatches = store.productMatches(for: value)
-                lookupMessage = "\(error.localizedDescription) You can still enter the item manually."
+                lookupMessage = String(localized: "\(error.localizedDescription) You can still enter the item manually.")
             }
             guard !Task.isCancelled, barcode == value else { return }
             isLookingUp = false
@@ -705,13 +705,13 @@ struct AddItemView: View {
             let prepared = await ImageProcessor.preparedData(data)
             guard imageData == nil else { return }
             imageData = prepared
-            photoMessage = "Product image added from the lookup result."
+            photoMessage = String(localized: "Product image added from the lookup result.")
         }
     }
     private func handleImage(_ data: Data) {
         let startingTitle = title
         let startingDescription = description
-        photoMessage = "Preparing photo…"
+        photoMessage = String(localized: "Preparing photo…")
         Task {
             let prepared = await ImageProcessor.preparedData(data)
             imageData = prepared
@@ -719,8 +719,8 @@ struct AddItemView: View {
                 let result = try await OCRService().recognizeText(in: prepared)
                 if startingTitle.isEmpty, title == startingTitle { title = result.lines.first ?? "" }
                 if startingDescription.isEmpty, description == startingDescription { description = result.text }
-                photoMessage = result.text.isEmpty ? "No readable text was found." : "Text recognized from photo. Review the suggested details."
-            } catch { photoMessage = "Photo saved, but text recognition failed." }
+                photoMessage = result.text.isEmpty ? String(localized: "No readable text was found.") : String(localized: "Text recognized from photo. Review the suggested details.")
+            } catch { photoMessage = String(localized: "Photo saved, but text recognition failed.") }
         }
     }
 }
@@ -744,7 +744,7 @@ struct EditItemView: View {
                     Picker("Status", selection: $state) { ForEach(store.statuses) { status in Text(status.name).tag(ItemState(rawValue: status.id)) } }
                     TextField("Tags, separated by commas", text: $tags)
                     PhotosPicker(selection: $pickerItem, matching: .images) { Label("Replace photo / run OCR", systemImage: "photo") }
-                        .onChange(of: pickerItem) { _, newValue in Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { recognitionMessage = "Preparing photo…"; let prepared = await ImageProcessor.preparedData(data); imageData = prepared; if let result = try? await OCRService().recognizeText(in: prepared) { if description.isEmpty { description = result.text }; recognitionMessage = "Text recognized from photo. Review your changes." } else { recognitionMessage = "Photo saved, but text recognition failed." } } } }
+                        .onChange(of: pickerItem) { _, newValue in Task { if let data = try? await newValue?.loadTransferable(type: Data.self) { recognitionMessage = String(localized: "Preparing photo…"); let prepared = await ImageProcessor.preparedData(data); imageData = prepared; if let result = try? await OCRService().recognizeText(in: prepared) { if description.isEmpty { description = result.text }; recognitionMessage = String(localized: "Text recognized from photo. Review your changes.") } else { recognitionMessage = String(localized: "Photo saved, but text recognition failed.") } } } }
                     if let recognitionMessage { Text(recognitionMessage).font(.footnote).foregroundStyle(.secondary) }
                 }
                 if !category.detailFields.isEmpty {
@@ -758,7 +758,7 @@ struct EditItemView: View {
                 if barcode != nil || sourceSnapshot != nil {
                     Section("Product metadata") {
                         Button { openMetadataMapping(category: category) } label: {
-                            Label(isLoadingSource ? "Loading product data…" : "Map API fields", systemImage: "arrow.triangle.branch")
+                            Label(isLoadingSource ? String(localized: "Loading product data…") : String(localized: "Map API fields"), systemImage: "arrow.triangle.branch")
                         }
                         .disabled(isLoadingSource)
                         if let snapshot = sourceSnapshot {
@@ -773,7 +773,7 @@ struct EditItemView: View {
                 Section { Button("Delete item", role: .destructive) { Task { if await store.deleteItem(original) { dismiss() } } } }
             }
             .disabled(!canEdit)
-            .navigationTitle(canEdit ? "Edit item" : "Item details")
+            .navigationTitle(canEdit ? String(localized: "Edit item") : String(localized: "Item details"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { var item = original; let previous = item.state; item.title = title; item.brand = brand; item.variant = variant; item.itemDescription = description; item.quantity = quantity; item.state = state; item.consumedAt = state == .consumed ? (item.consumedAt ?? .now) : nil; item.updatedAt = .now; item.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }; item.metadata = metadata.compactMapValues { value in if case .string(let text) = value, text.isEmpty { return nil }; return value }; item.barcode = barcode; item.imageData = imageData; item.sourceSnapshot = sourceSnapshot; if store.updateItem(item, previousState: previous) { dismiss() } }.disabled(!canEdit) }
@@ -788,14 +788,14 @@ struct EditItemView: View {
         sourceMessage = nil
         if sourceSnapshot != nil { showingMetadataMapping = true; return }
         guard category == .food, let barcode else {
-            sourceMessage = "Source refresh is not available for this item provider yet."
+            sourceMessage = String(localized: "Source refresh is not available for this item provider yet.")
             return
         }
         isLoadingSource = true
         Task {
             do {
                 guard let product = try await OpenFoodFactsProvider().product(for: barcode), let snapshot = product.sourceSnapshot else {
-                    sourceMessage = "No product source data was found for this barcode."
+                    sourceMessage = String(localized: "No product source data was found for this barcode.")
                     isLoadingSource = false
                     return
                 }
@@ -820,7 +820,7 @@ struct EditItemView: View {
         let details = product.extraFields.merging(["country": product.country ?? "", "categories": product.categories.joined(separator: ", ")]) { current, _ in current }
         for (key, value) in details where !value.isEmpty && (metadata[key]?.displayValue.isEmpty ?? true) { metadata[key] = .string(value) }
         sourceSnapshot = product.sourceSnapshot
-        sourceMessage = "Product details applied from name lookup."
+        sourceMessage = String(localized: "Product details applied from name lookup.")
         guard imageData == nil, let imageURL = product.imageURL else { return }
         Task {
             guard let (data, response) = try? await URLSession.shared.data(from: imageURL),
@@ -828,7 +828,7 @@ struct EditItemView: View {
             let prepared = await ImageProcessor.preparedData(data)
             guard imageData == nil else { return }
             imageData = prepared
-            recognitionMessage = "Product image added from the lookup result."
+            recognitionMessage = String(localized: "Product image added from the lookup result.")
         }
     }
     @ViewBuilder private var annotationsSection: some View {
@@ -884,7 +884,7 @@ struct BulkEditItemsView: View {
         NavigationStack {
             Form {
                 Section("Filtered items") {
-                    Label("\(items.count) item\(items.count == 1 ? "" : "s") selected", systemImage: "line.3.horizontal.decrease.circle")
+                    Label("Selected items: \(items.count)", systemImage: "line.3.horizontal.decrease.circle")
                     Text("This change applies to the current filtered results only.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

@@ -28,16 +28,16 @@ jobs:
           test "$(git ls-files build | wc -l | tr -d ' ')" = "0"
           ! rg -n 'SFSymbolSelector|\.\./SFSymbolSelector' CollectionManager.xcodeproj CollectionManager
       - name: Build macOS Release
-        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-macOS" CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-macOS" CODE_SIGNING_ALLOWED=NO build SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Build iOS Release-compatible configuration
-        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-iOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+        run: xcodebuild -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-iOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Validate project and test sources
         run: |
           xcodebuild -list -project CollectionManager.xcodeproj
       - name: Run unit tests
-        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" CODE_SIGNING_ALLOWED=NO -only-testing:CollectionManagerTests
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -sdk macosx -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" CODE_SIGNING_ALLOWED=NO -only-testing:CollectionManagerTests SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Run isolated UI smoke tests
-        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" -only-testing:CollectionManagerUITests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= DEVELOPMENT_TEAM=
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/CollectionManager-tests" -only-testing:CollectionManagerUITests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= DEVELOPMENT_TEAM= SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Select installed iPhone and iPad simulators
         run: |
           python3 - <<'PYTHON'
@@ -52,9 +52,9 @@ jobs:
                   output.write(key + '=' + device['udid'] + '\n')
           PYTHON
       - name: Run iPhone unit and UI suites
-        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPHONE" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPhone-tests"
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPHONE" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPhone-tests" SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Run native iPad UI suite
-        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPAD" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPad-tests" -only-testing:CollectionManagerUITests
+        run: xcodebuild test -project CollectionManager.xcodeproj -scheme CollectionManager -configuration Debug -destination "platform=iOS Simulator,id=$CM_IPAD" -derivedDataPath "$RUNNER_TEMP/CollectionManager-iPad-tests" -only-testing:CollectionManagerUITests SWIFT_TREAT_WARNINGS_AS_ERRORS=YES SWIFT_SUPPRESS_WARNINGS=NO
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

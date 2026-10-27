@@ -7,16 +7,20 @@ final class CollectionManagerUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
-    private func launch(onboarding: Bool) -> XCUIApplication {
+    private func launch(onboarding: Bool, rightToLeftLargeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
-            "--ui-testing", "-onboarding.hasCompleted", onboarding ? "NO" : "YES",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "--ui-testing",
+            "-AppleLanguages", rightToLeftLargeText ? "(ar)" : "(en)", "-AppleLocale", rightToLeftLargeText ? "ar_SA" : "en_US",
             "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"
         ]
         // The app derives the path inside its own temporary container, which
         // differs from the runner's container on iOS. The name survives relaunch.
         app.launchEnvironment["CM_TEST_STORE_NAME"] = UUID().uuidString
+        app.launchEnvironment["CM_TEST_ONBOARDING"] = onboarding ? "show" : "hide"
+        if rightToLeftLargeText {
+            app.launchArguments += ["--ui-testing-rtl-large-text", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-NSForceRightToLeftWritingDirection", "YES"]
+        }
         app.launch()
         return app
     }
@@ -27,6 +31,7 @@ final class CollectionManagerUITests: XCTestCase {
         defer { finish(app) }
         XCTAssertTrue(app.buttons["Skip"].waitForExistence(timeout: 15))
         app.buttons["Skip"].tap()
+        XCTAssertTrue(app.buttons["Skip"].waitForNonExistence(timeout: 10))
         #if os(iOS)
         // Compact NavigationSplitView starts on its sidebar; the empty detail
         // placeholder is intentionally not visible until a collection opens.
@@ -86,6 +91,28 @@ final class CollectionManagerUITests: XCTestCase {
     }
 
     #if os(iOS)
+    @MainActor
+    func testLargestTextRightToLeftOnboardingAndItemEditing() throws {
+        let app = launch(onboarding: true, rightToLeftLargeText: true)
+        defer { finish(app) }
+        XCTAssertTrue(app.buttons["Skip"].waitForExistence(timeout: 15))
+        app.buttons["Skip"].tap()
+        XCTAssertTrue(app.buttons["Skip"].waitForNonExistence(timeout: 10))
+        try createCollection(in: app, name: "A long collection title for accessibility layout")
+        app.buttons["Add item"].firstMatch.tap()
+        let title = app.textFields["Title"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.tap(); title.typeText("Long item title for the largest accessibility text layout")
+        app.buttons["Save"].firstMatch.tap()
+        let item = app.staticTexts["Long item title for the largest accessibility text layout"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        item.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, "Long item title for the largest accessibility text layout")
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+    }
+
     @MainActor
     func testTableDraftSurvivesRepresentationAndRotationOnIPad() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Table layout requires regular width")
@@ -156,6 +183,7 @@ final class CollectionManagerUITests: XCTestCase {
     @MainActor
     private func finish(_ app: XCUIApplication) {
         if (testRun?.failureCount ?? 0) > 0 {
+            print("CM_UI_FAILURE_HIERARCHY\n" + app.debugDescription)
             let hierarchy = XCTAttachment(string: app.debugDescription)
             hierarchy.name = "Isolated UI hierarchy at failure"
             hierarchy.lifetime = .keepAlways

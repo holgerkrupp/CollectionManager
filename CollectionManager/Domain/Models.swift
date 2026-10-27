@@ -17,12 +17,12 @@ nonisolated struct ItemState: RawRepresentable, Codable, Hashable, Identifiable,
     var id: String { rawValue }
     var label: String {
         switch rawValue {
-        case Self.wanted.rawValue: "Want to Try"
-        case Self.acquired.rawValue: "Acquired"
-        case Self.stored.rawValue: "In Storage"
-        case Self.inProgress.rawValue: "In Progress"
-        case Self.consumed.rawValue: "Consumed"
-        case Self.archived.rawValue: "Archived"
+        case Self.wanted.rawValue: String(localized: "Want to Try")
+        case Self.acquired.rawValue: String(localized: "Acquired")
+        case Self.stored.rawValue: String(localized: "In Storage")
+        case Self.inProgress.rawValue: String(localized: "In Progress")
+        case Self.consumed.rawValue: String(localized: "Consumed")
+        case Self.archived.rawValue: String(localized: "Archived")
         default: rawValue.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
@@ -50,7 +50,7 @@ nonisolated struct ItemState: RawRepresentable, Codable, Hashable, Identifiable,
     }
 }
 
-enum StatusColor: String, CaseIterable, Codable, Identifiable, Sendable {
+nonisolated enum StatusColor: String, CaseIterable, Codable, Identifiable, Sendable {
     case orange, blue, teal, purple, green, gray, red, pink, indigo, yellow
 
     var id: String { rawValue }
@@ -70,7 +70,7 @@ enum StatusColor: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-struct CollectionStatus: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct CollectionStatus: Identifiable, Codable, Hashable, Sendable {
     var id: String
     var name: String
     var color: StatusColor
@@ -97,7 +97,7 @@ struct CollectionStatus: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
+nonisolated enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case food
     case games
     case boardGames
@@ -110,7 +110,7 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
     var name: String {
-        switch self { case .food: "Food & Drinks"; case .games: "Video Games"; case .boardGames: "Board Games, Puzzles & Toys"; case .books: "Books & Comics"; case .music: "Music & Audio"; case .cosmetics: "Beauty & Personal Care"; case .petFood: "Pet Food"; case .products: "Toys, LEGO & Other Products"; case .custom: "Custom" }
+        switch self { case .food: String(localized: "Food & Drinks"); case .games: String(localized: "Video Games"); case .boardGames: String(localized: "Board Games, Puzzles & Toys"); case .books: String(localized: "Books & Comics"); case .music: String(localized: "Music & Audio"); case .cosmetics: String(localized: "Beauty & Personal Care"); case .petFood: String(localized: "Pet Food"); case .products: String(localized: "Toys, LEGO & Other Products"); case .custom: String(localized: "Custom") }
     }
     var supportsBarcodeScanning: Bool { self != .custom && barcodeProviderAvailable }
     var barcodeProviderAvailable: Bool {
@@ -125,21 +125,21 @@ enum CollectionCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     var detailFields: [(key: String, title: String, placeholder: String)] {
         switch self {
         case .food:
-            return [("country", "Country", "e.g. Germany"), ("categories", "Categories", "e.g. whisky, soda"), ("expression", "Expression", "e.g. Double Cask"), ("age", "Age", "e.g. 12 Year Old"), ("alcoholStrength", "Alcohol strength", "e.g. 40%"), ("packageSize", "Package size", "e.g. 700 ml")]
+            return [("country", String(localized: "Country"), String(localized: "e.g. Germany")), ("categories", String(localized: "Categories"), String(localized: "e.g. whisky, soda")), ("expression", String(localized: "Expression"), String(localized: "e.g. Double Cask")), ("age", String(localized: "Age"), String(localized: "e.g. 12 Year Old")), ("alcoholStrength", String(localized: "Alcohol strength"), String(localized: "e.g. 40%")), ("packageSize", String(localized: "Package size"), String(localized: "e.g. 700 ml"))]
         case .games:
-            return [("publisher", "Publisher", "e.g. Nintendo"), ("platform", "Platform", "e.g. Switch"), ("genre", "Genre", "e.g. strategy"), ("releaseYear", "Release year", "e.g. 2024"), ("players", "Players", "e.g. 2–4")]
+            return [("publisher", String(localized: "Publisher"), String(localized: "e.g. Nintendo")), ("platform", String(localized: "Platform"), String(localized: "e.g. Switch")), ("genre", String(localized: "Genre"), String(localized: "e.g. strategy")), ("releaseYear", String(localized: "Release year"), String(localized: "e.g. 2024")), ("players", String(localized: "Players"), String(localized: "e.g. 2–4"))]
         case .boardGames:
-            return [("bggID", "BoardGameGeek ID", "e.g. 174430"), ("publisher", "Publisher", "e.g. Cephalofair"), ("players", "Players", "e.g. 1–4"), ("playingTime", "Playing time", "e.g. 120 minutes")]
+            return [("bggID", String(localized: "BoardGameGeek ID"), String(localized: "e.g. 174430")), ("publisher", String(localized: "Publisher"), String(localized: "e.g. Cephalofair")), ("players", String(localized: "Players"), String(localized: "e.g. 1–4")), ("playingTime", String(localized: "Playing time"), String(localized: "e.g. 120 minutes"))]
         case .books:
-            return [("authors", "Authors", "e.g. Ursula K. Le Guin"), ("publisher", "Publisher", "e.g. Penguin"), ("publishedDate", "Published", "e.g. 1968"), ("pages", "Pages", "e.g. 304")]
+            return [("authors", String(localized: "Authors"), String(localized: "e.g. Ursula K. Le Guin")), ("publisher", String(localized: "Publisher"), String(localized: "e.g. Penguin")), ("publishedDate", String(localized: "Published"), String(localized: "e.g. 1968")), ("pages", String(localized: "Pages"), String(localized: "e.g. 304"))]
         case .music:
-            return [("artist", "Artist", "e.g. The Beatles"), ("releaseDate", "Release date", "e.g. 1967"), ("country", "Country", "e.g. GB"), ("format", "Format", "e.g. CD")]
+            return [("artist", String(localized: "Artist"), String(localized: "e.g. The Beatles")), ("releaseDate", String(localized: "Release date"), String(localized: "e.g. 1967")), ("country", String(localized: "Country"), String(localized: "e.g. GB")), ("format", String(localized: "Format"), String(localized: "e.g. CD"))]
         case .cosmetics:
-            return [("categories", "Categories", "e.g. shampoo"), ("country", "Country", "e.g. France")]
+            return [("categories", String(localized: "Categories"), String(localized: "e.g. shampoo")), ("country", String(localized: "Country"), String(localized: "e.g. France"))]
         case .petFood:
-            return [("categories", "Categories", "e.g. dog food"), ("country", "Country", "e.g. Germany")]
+            return [("categories", String(localized: "Categories"), String(localized: "e.g. dog food")), ("country", String(localized: "Country"), String(localized: "e.g. Germany"))]
         case .products:
-            return [("categories", "Categories", "e.g. LEGO, puzzle, household"), ("manufacturer", "Manufacturer", "e.g. Acme"), ("modelNumber", "Model / set number", "e.g. 10316")]
+            return [("categories", String(localized: "Categories"), String(localized: "e.g. LEGO, puzzle, household")), ("manufacturer", String(localized: "Manufacturer"), String(localized: "e.g. Acme")), ("modelNumber", String(localized: "Model / set number"), String(localized: "e.g. 10316"))]
         case .custom:
             return []
         }
@@ -191,7 +191,19 @@ nonisolated struct Barcode: Hashable, Codable, Sendable {
 
 nonisolated enum MetadataValue: Codable, Hashable, Sendable {
     case string(String), integer(Int), decimal(Double), boolean(Bool), date(Date), url(URL)
-    var displayValue: String { switch self { case .string(let v): v; case .integer(let v): "\(v)"; case .decimal(let v): "\(v)"; case .boolean(let v): v ? "Yes" : "No"; case .date(let v): v.formatted(date: .abbreviated, time: .omitted); case .url(let v): v.absoluteString } }
+    var displayValue: String { displayValue(locale: .current) }
+
+    func displayValue(locale: Locale) -> String {
+        switch self {
+        case .string(let value): value
+        case .integer(let value): value.formatted(.number.locale(locale))
+        case .decimal(let value): value.formatted(.number.locale(locale))
+        case .boolean(let value): value ? String(localized: "Yes", locale: locale) : String(localized: "No", locale: locale)
+        case .date(let value): value.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))
+        case .url(let value): value.absoluteString
+        }
+    }
+
 }
 
 nonisolated enum MetadataFieldType: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -202,7 +214,15 @@ nonisolated enum MetadataFieldType: String, CaseIterable, Codable, Identifiable,
     case color
 
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .text: String(localized: "Text")
+        case .number: String(localized: "Number")
+        case .date: String(localized: "Date")
+        case .boolean: String(localized: "Boolean")
+        case .color: String(localized: "Color")
+        }
+    }
     var symbol: String {
         switch self {
         case .text: "textformat"
@@ -220,7 +240,7 @@ nonisolated struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sen
     var type: MetadataFieldType
     var showsInItemRows: Bool
 
-    nonisolated init(id: UUID = UUID(), name: String = "New field", type: MetadataFieldType = .text, showsInItemRows: Bool = false) {
+    nonisolated init(id: UUID = UUID(), name: String = String(localized: "New field"), type: MetadataFieldType = .text, showsInItemRows: Bool = false) {
         self.id = id
         self.name = name
         self.type = type
@@ -250,7 +270,7 @@ nonisolated struct MetadataFieldDefinition: Identifiable, Codable, Hashable, Sen
     nonisolated var storageKey: String { "customField.\(id.uuidString)" }
 }
 
-struct CollectionModel: Identifiable, Hashable, Sendable {
+nonisolated struct CollectionModel: Identifiable, Hashable, Sendable {
     let id: UUID; var name: String; var icon: String; var subtitle: String; var category: CollectionCategory = .custom; var statuses: [CollectionStatus] = CollectionStatus.defaults; var mergedTags: [MergedTagRule] = []; var metadataFields: [MetadataFieldDefinition] = []; var defaultStatusID: String = ItemState.wanted.rawValue; var barcodeRequired: Bool = false; var role: CollectionMemberRole = .owner; var sharedWith: [String] = []
 
     func status(for state: ItemState) -> CollectionStatus {
@@ -259,22 +279,23 @@ struct CollectionModel: Identifiable, Hashable, Sendable {
 
     var caption: String {
         guard !sharedWith.isEmpty else { return subtitle }
-        return "Shared with " + ListFormatter.localizedString(byJoining: sharedWith)
+        let participants = ListFormatter.localizedString(byJoining: sharedWith)
+        return String(localized: "Shared with \(participants)")
     }
 }
 
-enum CollectionMemberRole: String, Codable, CaseIterable, Sendable {
+nonisolated enum CollectionMemberRole: String, Codable, CaseIterable, Sendable {
     case owner, editor, viewer
 
     var canEdit: Bool { self == .owner || self == .editor }
     var canDelete: Bool { self == .owner }
 }
 
-enum CollectionSyncState: String, Sendable {
+nonisolated enum CollectionSyncState: String, Sendable {
     case idle, syncing, pending, error
 }
 
-struct MergedTagRule: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct MergedTagRule: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var sourceTags: [String]
     var mergedTag: String
@@ -286,7 +307,7 @@ struct MergedTagRule: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-struct CollectionSettingsPayload: Codable, Sendable {
+nonisolated struct CollectionSettingsPayload: Codable, Sendable {
     var category: CollectionCategory = .custom
     var statuses: [CollectionStatus] = CollectionStatus.defaults
     var mergedTags: [MergedTagRule] = []
@@ -458,7 +479,7 @@ struct CollaboratorIdentity: Sendable {
     }
 }
 
-enum CollaborationRecordNames {
+nonisolated enum CollaborationRecordNames {
     static func rating(itemID: UUID, participantID: String) -> String {
         itemID.uuidString + "-rating-" + participantID
     }
@@ -466,7 +487,7 @@ enum CollaborationRecordNames {
     static func comment(_ id: UUID) -> String { id.uuidString }
 }
 
-struct CollectionProductMatch: Identifiable, Sendable {
+nonisolated struct CollectionProductMatch: Identifiable, Sendable {
     let id: UUID
     let collectionName: String
     let itemTitle: String
@@ -480,7 +501,12 @@ nonisolated enum SortDirection: String, CaseIterable, Identifiable, Sendable {
     case descending
 
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .ascending: String(localized: "Ascending")
+        case .descending: String(localized: "Descending")
+        }
+    }
 }
 
 nonisolated enum ItemSort: Hashable, Sendable {
@@ -494,15 +520,15 @@ nonisolated enum ItemSort: Hashable, Sendable {
 
     var label: String {
         switch self {
-        case .updatedDescending: "Recently updated"
-        case .titleAscending: "Title"
-        case .dateAscending: "Date (oldest first)"
-        case .dateDescending: "Date (newest first)"
-        case .metadata: "Metadata"
+        case .updatedDescending: String(localized: "Recently updated")
+        case .titleAscending: String(localized: "Title")
+        case .dateAscending: String(localized: "Date (oldest first)")
+        case .dateDescending: String(localized: "Date (newest first)")
+        case .metadata: String(localized: "Metadata")
         }
     }
 }
 
-struct CollectionSettings: Sendable { var statuses: [CollectionStatus]; var defaultState: ItemState; var requireBarcode: Bool; var defaultTags: [String] }
+nonisolated struct CollectionSettings: Sendable { var statuses: [CollectionStatus]; var defaultState: ItemState; var requireBarcode: Bool; var defaultTags: [String] }
 
-struct ItemEvent: Identifiable, Sendable { let id: UUID; let itemID: UUID; let timestamp: Date; let type: String; let note: String? }
+nonisolated struct ItemEvent: Identifiable, Sendable { let id: UUID; let itemID: UUID; let timestamp: Date; let type: String; let note: String? }

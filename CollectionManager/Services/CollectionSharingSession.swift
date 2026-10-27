@@ -67,9 +67,9 @@ final class CollectionSharingSession {
         backend.onSharedDatabaseFetchResult = { [weak self] failure in
             if let failure {
                 self?.invitationFailure = Self.message(for: failure)
-                self?.invitationStatus = "Invitation accepted. Collection download needs another sync."
+                self?.invitationStatus = String(localized: "Invitation accepted. Collection download needs another sync.")
             } else {
-                self?.invitationStatus = "Invitation accepted. Check the library for the downloaded collection."
+                self?.invitationStatus = String(localized: "Invitation accepted. Check the library for the downloaded collection.")
             }
         }
         let backend = self.backend
@@ -157,12 +157,12 @@ final class CollectionSharingSession {
             switch result {
             case .accepted:
                 pendingMetadata.removeValue(forKey: metadata.share.recordID)
-                invitationStatus = "Invitation accepted. The collection is downloading."
+                invitationStatus = String(localized: "Invitation accepted. The collection is downloading.")
                 invitationFailure = nil
             case .duplicate:
-                invitationStatus = "This invitation was already received. Check the library for download status."
+                invitationStatus = String(localized: "This invitation was already received. Check the library for download status.")
             case .queuedUntilStoresLoad:
-                invitationStatus = "Invitation waiting for the library to open."
+                invitationStatus = String(localized: "Invitation waiting for the library to open.")
             }
         } catch {
             pendingMetadata[metadata.share.recordID] = metadata
@@ -203,10 +203,10 @@ final class CollectionSharingSession {
             switch result.outcome {
             case .accepted:
                 pendingMetadata = pendingMetadata.filter { $0.key.recordName != result.key.shareRecordName || $0.key.zoneID.zoneName != result.key.ownerZoneName }
-                invitationStatus = "Invitation accepted. The collection is downloading."
+                invitationStatus = String(localized: "Invitation accepted. The collection is downloading.")
                 invitationFailure = nil
             case .duplicate:
-                invitationStatus = "This invitation was already received. Check the library for download status."
+                invitationStatus = String(localized: "This invitation was already received. Check the library for download status.")
             case .failed(let failure): invitationFailure = Self.message(for: failure)
             }
         }
@@ -220,13 +220,13 @@ final class CollectionSharingSession {
             (error as? any CollaborationFailureReporting)?.collaborationFailure ??
             CollaborationErrorClassifier.classify(error)
         switch failure {
-        case .noAccount: return "Sign in to iCloud and try again."
-        case .restricted: return "This account cannot perform this sharing action."
-        case .wrongContainer, .wrongEnvironment: return "This invitation does not match this version of Collection Manager."
-        case .quotaExceeded: return "Your iCloud storage is full. Free some space and try again."
-        case .conflict: return "Sharing changed on another device. Refresh and try again."
-        case .revokedAccess, .notInvited: return "This invitation is unavailable. Ask the owner to check access."
-        default: return "iCloud sharing is temporarily unavailable. Check your connection and try again."
+        case .noAccount: return String(localized: "Sign in to iCloud and try again.")
+        case .restricted: return String(localized: "This account cannot perform this sharing action.")
+        case .wrongContainer, .wrongEnvironment: return String(localized: "This invitation does not match this version of Collection Manager.")
+        case .quotaExceeded: return String(localized: "Your iCloud storage is full. Free some space and try again.")
+        case .conflict: return String(localized: "Sharing changed on another device. Refresh and try again.")
+        case .revokedAccess, .notInvited: return String(localized: "This invitation is unavailable. Ask the owner to check access.")
+        default: return String(localized: "iCloud sharing is temporarily unavailable. Check your connection and try again.")
         }
     }
 }

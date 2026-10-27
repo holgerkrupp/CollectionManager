@@ -9,7 +9,7 @@ final class ReleaseFlowsUITests: XCTestCase {
     @MainActor
     func testBarcodeRulePersistsAndValidationPreservesDraft() {
         let app = launch()
-        defer { app.terminate() }
+        defer { finish(app) }
         createCollection(in: app, name: "Barcode rule fixture")
         openCollectionRules(in: app)
         let rule = app.switches["Require barcode"].firstMatch
@@ -55,7 +55,7 @@ final class ReleaseFlowsUITests: XCTestCase {
     @MainActor
     func testStatusFilterTitleSortAndOfflineSharingRecovery() {
         let app = launch()
-        defer { app.terminate() }
+        defer { finish(app) }
         createCollection(in: app, name: "Filter fixture")
         addItem(in: app, title: "Zebra release fixture")
         addItem(in: app, title: "Alpha release fixture", status: "Consumed")
@@ -92,7 +92,7 @@ final class ReleaseFlowsUITests: XCTestCase {
     @MainActor
     func testCredentialSettingsAndRealCSVReviewImport() {
         let app = launch(csvFixture: true)
-        defer { app.terminate() }
+        defer { finish(app) }
         let settings = app.buttons["Settings"].firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 15))
         settings.tap()
@@ -114,13 +114,14 @@ final class ReleaseFlowsUITests: XCTestCase {
         openMore(in: app)
         app.buttons["Import CSV"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Import CSV"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["CSV fixture item"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["CSV fixture item"].firstMatch.waitForExistence(timeout: 10))
         let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review ")).firstMatch
-        XCTAssertTrue(review.isEnabled)
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: review)], timeout: 10) == .completed)
         review.tap()
         XCTAssertTrue(app.navigationBars["Review import"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["CSV fixture item"].firstMatch.exists)
         app.buttons["Import 1"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Review import"].waitForNonExistence(timeout: 15))
         let imported = app.staticTexts["CSV fixture item"].firstMatch
         XCTAssertTrue(imported.waitForExistence(timeout: 10))
         imported.tap()
@@ -131,10 +132,22 @@ final class ReleaseFlowsUITests: XCTestCase {
     }
 
     @MainActor
+    private func finish(_ app: XCUIApplication) {
+        if (testRun?.failureCount ?? 0) > 0 {
+            print("CM_UI_FAILURE_HIERARCHY\n" + app.debugDescription)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+        app.terminate()
+    }
+
+    @MainActor
     private func launch(csvFixture: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-onboarding.hasCompleted", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launchEnvironment["CM_TEST_STORE_NAME"] = UUID().uuidString
+        app.launchEnvironment["CM_TEST_ONBOARDING"] = "hide"
         if csvFixture { app.launchEnvironment["CM_TEST_CSV_FIXTURE"] = "basic" }
         app.launch()
         return app

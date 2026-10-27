@@ -8,10 +8,11 @@ Implemented source and deterministic coverage now include persistent recovery,
 typed/atomic repository writes, immutable V1 + additive V2 migration fixtures,
 Keychain-only Games EAN credentials, settings validation, parent-owned edit
 sessions, package-based SwiftData collaboration/native UI, durable journal and
-handoff, background queries, bounded image thumbnails and host benchmarks.
+handoff, background import preparation/transactions and queries, bounded image thumbnails,
+locale-aware presentation and measured host benchmarks.
 See README and docs/VALIDATION.md for precise evidence and limitations.
 
-Remaining gates are tracked in #6–#17 as appropriate: provider credential revocation (#6); signed existing/new share,
+Remaining gates are tracked in #5–#17 as appropriate: compatible-host migration CI (#5/#11); provider credential revocation (#6); signed existing/new share,
 role/revoke/leave/offline/mixed-client/production schema matrix (#9/#10/#17);
 UI runtime authorization and compatible CI host (#11); measured device/frame/image
 memory/network scale acceptance (#12); device accessibility/RTL/long-string,

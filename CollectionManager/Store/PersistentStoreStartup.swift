@@ -21,7 +21,7 @@ struct StoreStartupFailure: LocalizedError, Sendable {
         if requiredChoice != .none {
             return String(localized: "Your existing library is preserved. Check its iCloud environment before opening this build.")
         }
-        return "Collection Manager could not open its persistent library. Your existing store files were not deleted or replaced."
+        return String(localized: "Collection Manager could not open its persistent library. Your existing store files were not deleted or replaced.")
     }
 
     var recoveryMessage: String {
@@ -36,9 +36,9 @@ struct StoreStartupFailure: LocalizedError, Sendable {
         }
         return switch phase {
         case .recoverableFailure:
-            "Retry after checking available disk space, file permissions, or an iCloud/account transition."
+            String(localized: "Retry after checking available disk space, file permissions, or an iCloud/account transition.")
         case .unrecoverableFailure:
-            "The store may be incompatible or damaged. Export a diagnostic copy and contact support before taking any recovery action."
+            String(localized: "The store may be incompatible or damaged. Export a diagnostic copy and contact support before taking any recovery action.")
         case .loading, .ready:
             ""
         }
@@ -194,7 +194,7 @@ struct StoreRecoveryView: View {
                     .buttonStyle(.borderedProminent)
                 Button("Export store copy") {
                     do { exportURL = try PersistentStoreBootstrap.makeSafeExport(from: failure.storeURL) }
-                    catch { exportError = "The store copy could not be prepared." }
+                    catch { exportError = String(localized: "The store copy could not be prepared.") }
                 }
                 .buttonStyle(.bordered)
             }

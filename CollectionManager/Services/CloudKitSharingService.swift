@@ -14,17 +14,17 @@ enum SharingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            "iCloud sharing is unavailable on this device."
+            String(localized: "iCloud sharing is unavailable on this device.")
         case .noAccount:
-            "No iCloud account is available to Collection Manager. Sign in to iCloud, enable iCloud Drive, and try again."
+            String(localized: "No iCloud account is available to Collection Manager. Sign in to iCloud, enable iCloud Drive, and try again.")
         case .restricted:
-            "This iCloud account is restricted from sharing. Check Screen Time or device-management restrictions and try again."
+            String(localized: "This iCloud account is restricted from sharing. Check Screen Time or device-management restrictions and try again.")
         case .temporarilyUnavailable:
-            "iCloud is temporarily unavailable. Check your connection and try again."
+            String(localized: "iCloud is temporarily unavailable. Check your connection and try again.")
         case .invalidInvitation:
-            "This invitation does not belong to Collection Manager. Ask the owner to send a new invitation from the app."
+            String(localized: "This invitation does not belong to Collection Manager. Ask the owner to send a new invitation from the app.")
         case .invitationNotReady:
-            "The invitation was accepted, but iCloud is still preparing the shared collection. Wait a moment and try syncing again."
+            String(localized: "The invitation was accepted, but iCloud is still preparing the shared collection. Wait a moment and try syncing again.")
         }
     }
 }

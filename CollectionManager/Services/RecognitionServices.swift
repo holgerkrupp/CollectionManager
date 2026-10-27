@@ -72,7 +72,7 @@ enum GamesEANAPIKeyStore {
 
     enum StorageError: LocalizedError {
         case unavailable
-        var errorDescription: String? { "The API key could not be accessed in Keychain. Unlock your device and try again." }
+        var errorDescription: String? { String(localized: "The API key could not be accessed in Keychain. Unlock your device and try again.") }
     }
 
     static func load() throws -> String {
@@ -120,13 +120,13 @@ enum ProductLookupError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidAPIKey: "The API key contains unsupported characters. Paste the key again in Settings."
-        case .missingAPIKey: "Add the Games EAN API key in Settings before looking up games."
-        case .unauthorized: "The Games EAN API key was rejected. Check the key in Settings."
-        case .invalidResponse: "The product service returned an invalid response."
-        case .rateLimited: "The product service is temporarily rate-limiting requests. Try again shortly."
-        case .serviceUnavailable: "The product service is temporarily unavailable."
-        case .network: "The product lookup could not reach the internet."
+        case .invalidAPIKey: String(localized: "The API key contains unsupported characters. Paste the key again in Settings.")
+        case .missingAPIKey: String(localized: "Add the Games EAN API key in Settings before looking up games.")
+        case .unauthorized: String(localized: "The Games EAN API key was rejected. Check the key in Settings.")
+        case .invalidResponse: String(localized: "The product service returned an invalid response.")
+        case .rateLimited: String(localized: "The product service is temporarily rate-limiting requests. Try again shortly.")
+        case .serviceUnavailable: String(localized: "The product service is temporarily unavailable.")
+        case .network: String(localized: "The product lookup could not reach the internet.")
         }
     }
 }
@@ -663,4 +663,4 @@ struct MusicBrainzProvider: ProductMetadataProvider {
     }
 }
 
-enum RecognitionError: LocalizedError { case invalidImage; var errorDescription: String? { "The image could not be analyzed." } }
+enum RecognitionError: LocalizedError { case invalidImage; var errorDescription: String? { String(localized: "The image could not be analyzed.") } }

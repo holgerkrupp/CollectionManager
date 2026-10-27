@@ -1,14 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-private enum CollectionLayoutPreferences {
-    static let defaults: UserDefaults = {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-testing"), let name = ProcessInfo.processInfo.environment["CM_TEST_STORE_NAME"], UUID(uuidString: name) != nil, let isolated = UserDefaults(suiteName: "CollectionManager-UI-layout-" + name) { return isolated }
-        #endif
-        return .standard
-    }()
-}
 import AppIntents
 import TipKit
 
@@ -18,15 +10,29 @@ struct CollectionDetailView: View {
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
-    @AppStorage("collection.layout.usesTable", store: CollectionLayoutPreferences.defaults) private var prefersTableLayout = false
+    @AppStorage("collection.layout.usesTable", store: ApplicationPreferences.defaults) private var prefersTableLayout = false
     @State private var showingAddItem = false; @State private var showingBulkEdit = false; @State private var showingTagManager = false; @State private var showingDeleteAllConfirmation = false
-    @State private var showingImporter = false; @State private var showingHTMLImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportFile: CSVParsedFile?; @State private var csvImportError: String?; @State private var isImporting = false
+    @State private var showingImporter = false; @State private var showingWebSync = false; @State private var showingEditCollection = false; @State private var showingSharing = false; @State private var csvImportFile: CSVImportRoute?; @State private var csvImportError: String?; @State private var isImporting = false
     @State private var showingSyncError = false
+    @State private var importCollectionID: UUID?
+    @State private var htmlImportTarget: HTMLImportRoute?
+    private struct CSVImportRoute: Identifiable {
+        let file: CSVParsedFile
+        let collectionID: UUID
+        var id: UUID { file.id }
+    }
+    private struct HTMLImportRoute: Identifiable {
+        let collectionID: UUID
+        var id: UUID { collectionID }
+    }
     private let tableLayoutTip = TableLayoutTip()
     private let bulkEditTip = BulkEditTip()
     private let shareTip = ShareCollectionTip()
     var body: some View {
         @Bindable var store = store
+        // Register the file picker's immutable target in this presentation's
+        // body too; a first presentation must not capture an older State value.
+        let filePickerCollectionID = importCollectionID
         Group { if showsTableLayout { tableLayout } else { cardLayout } }
             .refreshable { await store.syncCollections() }
             .background(Color.platformGroupedBackground).navigationTitle(store.selectedCollection?.name ?? "Collection")
@@ -44,6 +50,7 @@ struct CollectionDetailView: View {
             .sheet(isPresented: $showingBulkEdit) { BulkEditItemsView(items: store.visibleItems) }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.commaSeparatedText, .text], allowsMultipleSelection: false) { result in
                 guard case .success(let urls) = result, let url = urls.first else { return }
+                guard let collectionID = filePickerCollectionID else { return }
                 isImporting = true
                 Task {
                     let parsed = await Task.detached(priority: .userInitiated) {
@@ -60,12 +67,12 @@ struct CollectionDetailView: View {
                         }
                     }.value
                     isImporting = false
-                    csvImportFile = parsed.file
+                    csvImportFile = parsed.file.map { CSVImportRoute(file: $0, collectionID: collectionID) }
                     csvImportError = parsed.error
                 }
             }
-            .sheet(item: $csvImportFile) { file in CSVImportView(file: file) }
-            .sheet(isPresented: $showingHTMLImporter) { HTMLImportView() }
+            .sheet(item: $csvImportFile) { route in CSVImportView(file: route.file, collectionID: route.collectionID) }
+            .sheet(item: $htmlImportTarget) { route in HTMLImportView(collectionID: route.collectionID) }
             .sheet(isPresented: $showingWebSync) { WebSyncListView() }
             .sheet(isPresented: $showingTagManager) { if let collection = store.selectedCollection { TagManagementView(collection: collection) } }
             #if os(iOS)
@@ -94,10 +101,13 @@ struct CollectionDetailView: View {
             }
     }
     private func openCSVImporter() {
+        guard let collectionID = store.selectedCollection?.id else { return }
+        importCollectionID = collectionID
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing"), ProcessInfo.processInfo.environment["CM_TEST_CSV_FIXTURE"] == "basic" {
             do {
-                csvImportFile = try CollectionImporter().parseFile(Data("Title,Brand,Quantity\r\nCSV fixture item,Example,2\r\n".utf8), fileName: "UI-fixture.csv")
+                let file = try CollectionImporter().parseFile(Data("Title,Brand,Quantity\r\nCSV fixture item,Example,2\r\n".utf8), fileName: "UI-fixture.csv")
+                csvImportFile = CSVImportRoute(file: file, collectionID: collectionID)
             } catch { csvImportError = error.localizedDescription }
             return
         }
@@ -105,12 +115,17 @@ struct CollectionDetailView: View {
         showingImporter = true
     }
 
+    private func openHTMLImporter() {
+        guard let collectionID = store.selectedCollection?.id else { return }
+        htmlImportTarget = HTMLImportRoute(collectionID: collectionID)
+    }
+
     private var moreMenu: some View {
         Menu {
             Group {
                 Button { showingAddItem = true } label: { Label("Add item", systemImage: "plus") }
                 Button { openCSVImporter() } label: { Label("Import CSV", systemImage: "square.and.arrow.down") }
-                Button { showingHTMLImporter = true } label: { Label("Import web / HTML", systemImage: "globe") }
+                Button { openHTMLImporter() } label: { Label("Import web / HTML", systemImage: "globe") }
                 Button { showingWebSync = true } label: { Label("Background web sync", systemImage: "arrow.triangle.2.circlepath") }
                 Button { showingTagManager = true } label: { Label("Manage tags", systemImage: "tag") }
                 Button(role: .destructive) { showingDeleteAllConfirmation = true } label: { Label("Delete all items", systemImage: "trash") }
@@ -225,12 +240,12 @@ struct CollectionDetailView: View {
 
     private var header: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text("Your shared shelf").font(.title2.bold()); Text("Everything you want to remember, together.").foregroundStyle(.secondary) }; Spacer(); Image(systemName: store.selectedCollection?.icon ?? "square.stack").font(.system(size: 32)).foregroundStyle(.pink).padding(14).background(.pink.opacity(0.12), in: .circle) } }
     private var syncBanner: some View { Group { if store.syncState == .syncing { Label("Syncing collaboration changes…", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.secondary) } else if let error = store.syncError { HStack { Button { showingSyncError = true } label: { Label("Sync needs attention", systemImage: "exclamationmark.icloud") }.buttonStyle(.plain); Spacer(); Button("Retry") { Task { await store.syncCollections() } } }.font(.footnote).foregroundStyle(.orange).help(error) } else if store.syncState == .idle { Label("Changes are saved to iCloud", systemImage: "checkmark.icloud").font(.footnote).foregroundStyle(.secondary) } } }
-    private var stats: some View { let s = store.stats; return HStack(spacing: 10) { StatTile(value: s.stored, label: "In storage", color: .teal); StatTile(value: s.consumed, label: "Consumed", color: .green); StatTile(value: s.wanted, label: "Want to try", color: .orange) } }
+    private var stats: some View { let s = store.stats; return HStack(spacing: 10) { StatTile(value: s.stored, label: String(localized: "In storage"), color: .teal); StatTile(value: s.consumed, label: String(localized: "Consumed"), color: .green); StatTile(value: s.wanted, label: String(localized: "Want to try"), color: .orange) } }
     private var filterBar: some View {
         @Bindable var store = store
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack {
-                FilterChip(title: "All", isSelected: store.selectedState == nil) { store.selectedState = nil }
+                FilterChip(title: String(localized: "All"), isSelected: store.selectedState == nil) { store.selectedState = nil }
                 ForEach(store.statuses) { status in
                     let state = ItemState(rawValue: status.id)
                     FilterChip(title: status.name, icon: status.symbol, isSelected: store.selectedState == state) {
@@ -245,7 +260,7 @@ struct CollectionDetailView: View {
                         Button(brand) { store.selectedBrand = brand; AppTips.listFiltered.sendDonation() }
                     }
                 } label: {
-                    Label(store.selectedBrand ?? "Brand", systemImage: "line.3.horizontal.decrease.circle")
+                    Label(store.selectedBrand ?? String(localized: "Brand"), systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .buttonStyle(.bordered)
                 .help("Show only items from one brand")
@@ -287,7 +302,7 @@ struct CollectionDetailView: View {
                     bulkEditTip.invalidate(reason: .actionPerformed)
                     showingBulkEdit = true
                 } label: {
-                    Label("Edit \(store.visibleItems.count) items", systemImage: "square.and.pencil")
+                    Label("Edit visible items (\(store.visibleItems.count))", systemImage: "square.and.pencil")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canBulkEdit)
