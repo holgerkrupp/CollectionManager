@@ -179,6 +179,14 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         return "pending"
     }
 
+    /// Unmatched legacy snapshots are a separate recovery decision, not a
+    /// transport failure. Keep the handoff incomplete and snapshots quarantined
+    /// while allowing successful fetch/send passes to leave the pool running.
+    func finishSynchronization() throws {
+        do { try completeHandoff() }
+        catch CollectionCodecError.legacyReconciliationRequired { return }
+    }
+
     func completeHandoff() throws {
         beginOperation()
         defer { endOperation() }

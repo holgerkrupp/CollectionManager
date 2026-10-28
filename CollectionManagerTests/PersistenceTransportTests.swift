@@ -33,6 +33,7 @@ import CollaborationCore
         }
         let beforeComplete = try await actor.handoffStatus(); XCTAssertEqual(beforeComplete, "reconciling")
         do { try await actor.completeHandoff(); XCTFail("Unacknowledged payloads must block completion") } catch { XCTAssertTrue(error is CollectionCodecError) }
+        do { try await actor.finishSynchronization(); XCTFail("Real pending writes must still fail the sync pass") } catch { XCTAssertTrue(error is CollectionCodecError) }
         let beforeDrain = try await actor.pendingLocalChanges(in: .private)
         XCTAssertEqual(beforeDrain.count, 0)
         var drainPasses = 0
@@ -230,6 +231,18 @@ import CollaborationCore
         let pending = try await actor.pendingLocalChanges(in: .private); XCTAssertTrue(pending.isEmpty)
         let baseline = try await actor.unreconciledBaselineCount(); XCTAssertEqual(baseline, 2)
         do { try await actor.completeHandoff(); XCTFail("Ambiguous prior local rows require reconciliation") } catch { XCTAssertTrue(error is CollectionCodecError) }
+        // A successful sync may defer recovery review across restarts without
+        // falsely completing migration, uploading or deleting ambiguous rows.
+        for _ in 0..<2 {
+            let restarted = codec(container)
+            try await restarted.finishSynchronization()
+            let status = try await restarted.handoffStatus()
+            let count = try await restarted.unreconciledBaselineCount()
+            let changes = try await restarted.pendingLocalChanges(in: .private)
+            XCTAssertEqual(status, "reconciling")
+            XCTAssertEqual(count, baseline)
+            XCTAssertTrue(changes.isEmpty)
+        }
         let zone = CKRecordZone.ID(zoneName: "collection-\(collectionID.uuidString)", ownerName: CKCurrentUserDefaultName)
         try await actor.applyRemoteChanges(records: [], deletedRecordIDs: [CKRecord.ID(recordName: item.id.uuidString, zoneID: zone)], in: .private)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<ItemRecord>()), 0)

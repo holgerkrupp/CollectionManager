@@ -137,7 +137,7 @@ import SwiftData
         }
         needsContinuation = try await codec.hasEligibleUnstagedMutations()
         legacyReviewCount = try await codec.unreconciledBaselineCount()
-        if !needsContinuation { try await codec.completeHandoff() }
+        if !needsContinuation { try await codec.finishSynchronization() }
     }
 
     private func currentAccountPartition() async throws -> String {

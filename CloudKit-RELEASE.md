@@ -71,6 +71,8 @@ real owner-device upload/download evidence, not the multi-account sharing matrix
 Settings → Review recovered changes decisions. No item baseline remains. These
 are preserved local history whose prior server state is ambiguous; successful
 transport does not establish that every history record should be re-uploaded.
-The handoff remains `reconciling`, and the app may show the specific migration
-review warning until those decisions are resolved. Do not treat that warning
-as a network failure or automatically discard/upload the snapshots.
+The handoff remains `reconciling` until those decisions are resolved. Recovery
+review is shown separately in Settings; it must not turn successful transport
+into a sync error or stop the engine pool. Actual pending writes and account,
+network or persistence failures still fail the sync pass. Never automatically
+discard/upload the quarantined snapshots.
