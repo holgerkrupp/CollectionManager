@@ -52,6 +52,7 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
     private var operationSnapshot: StoreWriteCoordinator.Snapshot?
     private var inFlight: [String: UUID] = [:]
     private var persistenceFailure: (() throws -> Void)?
+    private var eventFailureDiagnostic: String?
 
     init(modelContainer: ModelContainer, containerIdentifier: String, environment: CollaborationEnvironment, accountPartitionIdentifier: String) {
         let context = ModelContext(modelContainer)
@@ -96,6 +97,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
             // Do not bless unrelated scopes that changed while this operation read.
             for id in changed { operationSnapshot?[id] = committed[id] }
         } catch {
+            let failure = error as NSError
+            eventFailureDiagnostic = "Local commit: \(failure.domain) (\(failure.code))"
             modelContext.rollback()
             throw RepositoryError.saveFailed
         }
@@ -302,14 +305,17 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         beginOperation()
         defer { endOperation() }
 
-        try state(scope).engineState = data
+        let value = try state(scope)
+        value.engineState = data
+        value.lastFailure = nil
         try commit()
+        eventFailureDiagnostic = nil
     }
     func reportStatePersistenceFailure(_ failure: CollaborationFailure, for scope: CollaborationDatabaseScope) {
         beginOperation()
         defer { endOperation() }
 
-        do { try state(scope).lastFailure = "Collaboration progress could not be committed."; try commit() }
+        do { try state(scope).lastFailure = eventFailureDiagnostic ?? "Collaboration progress could not be committed."; try commit() }
         catch { /* Preserve the previous durable state; the pool is already stopped. */ }
     }
 
@@ -678,6 +684,7 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         for id in deletedRecordIDs { try markBaselineReconciled(id, scope: scope) }
         for id in savedRecords.map(\.recordID) + deletedRecordIDs {
             let key = identity(id, scope: scope)
+            for diagnostic in try failureRows(for: id, scope: scope) { modelContext.delete(diagnostic) }
             let rows = try outgoing(scope).filter { rowID($0) == id && ($0.operation == "save" || $0.operation == "delete") }
             // Deletes have no record-provider callback. Their oldest generation
             // is what the engine could have sent; newer generations stay queued.
@@ -849,7 +856,8 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         beginOperation()
         defer { endOperation() }
 
-        guard error.code == .serverRecordChanged, let serverRecord else { return }
+        try recordUploadFailure(attemptedRecord.recordID, type: attemptedRecord.recordType, error: error, scope: scope)
+        guard error.code == .serverRecordChanged, let serverRecord else { try commit(); return }
         let deleteCollection = try self.collectionID(for: attemptedRecord.recordID.zoneID, scope: scope)
         let deleteName = attemptedRecord.recordID.recordName
         let localDelete = try first(FetchDescriptor<SyncMutationRecord>(predicate: #Predicate { $0.collectionID == deleteCollection && $0.recordName == deleteName && $0.operation == "delete" })) != nil
@@ -883,11 +891,36 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         }
     }
 
+    private func failureRows(for id: CKRecord.ID, scope: CollaborationDatabaseScope) throws -> [CollectionOutgoingSnapshot] {
+        let key = partition, raw = scope.rawValue, owner = id.zoneID.ownerName, zone = id.zoneID.zoneName, name = id.recordName
+        return try modelContext.fetch(FetchDescriptor<CollectionOutgoingSnapshot>(predicate: #Predicate {
+            $0.partition == key && $0.scope == raw && $0.ownerName == owner && $0.zoneName == zone && $0.recordName == name && $0.operation == "syncFailure"
+        }))
+    }
+
+    /// Retain bounded, local-only per-record diagnostics instead of silently
+    /// swallowing a server rejection. No record values, tokens or credentials.
+    private func recordUploadFailure(_ id: CKRecord.ID, type: String, error: CKError, scope: CollaborationDatabaseScope) throws {
+        let rows = try failureRows(for: id, scope: scope)
+        let value = rows.first ?? CollectionOutgoingSnapshot(partition: partition, scope: scope.rawValue,
+            zoneName: id.zoneID.zoneName, ownerName: id.zoneID.ownerName, recordName: id.recordName)
+        if value.modelContext == nil { modelContext.insert(value) }
+        value.collectionID = try collectionID(for: id.zoneID, scope: scope)
+        value.recordType = type; value.operation = "syncFailure"
+        value.recordArchive = try JSONEncoder().encode(["code": String(error.code.rawValue), "message": String(error.localizedDescription.prefix(500))])
+        let covered = Set(try outgoing(scope).filter { rowID($0) == id }.flatMap { try JSONDecoder().decode([UUID].self, from: $0.mutationIDs) })
+        for mutation in try modelContext.fetch(FetchDescriptor<SyncMutationRecord>()) where covered.contains(mutation.id) {
+            mutation.attempts += 1
+            mutation.lastError = "CloudKit upload failed (\(error.code.rawValue))."
+        }
+    }
+
     func retainFailedDelete(_ recordID: CKRecord.ID, error: CKError, in scope: CollaborationDatabaseScope) throws {
         beginOperation()
         defer { endOperation() }
 
         // No acknowledgement, no journal removal. A retry restores it on restart.
+        try recordUploadFailure(recordID, type: "delete", error: error, scope: scope)
         try state(scope).lastFailure = "A cloud deletion is still pending."
         try commit()
     }
@@ -908,7 +941,38 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
         defer { endOperation() }
 
  try commit() }
-    func accountDidChange(_ event: CKSyncEngine.Event.AccountChange, in scope: CollaborationDatabaseScope) throws { throw CollectionCodecError.accountPartitionMismatch }
+    func accountDidChange(_ event: CKSyncEngine.Event.AccountChange, in scope: CollaborationDatabaseScope) throws {
+        try handleAccountChange(event.changeType)
+    }
+
+    /// CKSyncEngine reports initial sign-in when starting without serialized
+    /// state. That is expected, not an account switch. Never adopt a new account
+    /// into an existing graph or clear its journal in response to this event.
+    func handleAccountChange(_ change: CKSyncEngine.Event.AccountChange.ChangeType) throws {
+        beginOperation()
+        defer { endOperation() }
+        switch change {
+        case .signIn(let currentUser):
+            eventFailureDiagnostic = "Account event: initial sign-in"
+            let current = SHA256.hash(data: Data(currentUser.recordName.utf8)).map { String(format: "%02x", $0) }.joined()
+            guard current == accountPartitionIdentifier else {
+                eventFailureDiagnostic = "Account event: sign-in partition mismatch"
+                throw CollectionCodecError.accountPartitionMismatch
+            }
+            try claimGraph()
+            try commit()
+            eventFailureDiagnostic = nil
+        case .signOut:
+            eventFailureDiagnostic = "Account event: signed out"
+            throw CollectionCodecError.accountPartitionMismatch
+        case .switchAccounts:
+            eventFailureDiagnostic = "Account event: switched accounts"
+            throw CollectionCodecError.accountPartitionMismatch
+        @unknown default:
+            eventFailureDiagnostic = "Account event: unrecognized change"
+            throw CollectionCodecError.accountPartitionMismatch
+        }
+    }
 
     func encode(_ change: SwiftDataHistoryChange, in scope: CollaborationDatabaseScope) throws -> [CloudKitRecordChange] {
         beginOperation()

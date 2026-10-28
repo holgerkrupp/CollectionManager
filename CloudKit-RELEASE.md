@@ -47,3 +47,30 @@ copy and pending work; backward binary compatibility and mixed old/new clients
 require explicit validation before rollout.
 
 For a historical library without a transport owner marker, verify that the currently signed-in Apple Account is its original account before confirming the recovery prompt. The old schema did not record an authoritative account identity; confirmation is a required manual migration gate. Once bound, account switches fail closed and retain pending work.
+
+## Production repair verified 28 October 2026
+
+The authenticated CloudKit Console now shows Production `CollectionItem` with
+24 fields, `CollectionItemComment` with 13 and `CollectionItemRating` with 12
+(including system fields). Additions were `imageSystemName` (String),
+`importSourceKey` (String), `sourceSnapshotJSON` (String), `imageAsset` (Asset),
+and the comment/rating types already emitted by the codec. No existing fields,
+records, zones or shares were removed. Development and Production deployment
+review subsequently reported no remaining schema differences. The actual
+Production rejection before deployment was CKError 12: modifying undeployed
+`CollectionItem.imageSystemName`.
+
+The corrected Production build was installed over the existing iPhone app.
+A subsequent device snapshot confirmed both private/shared engine states were
+durable with no persistence failure, zero pending repository mutations, zero
+outgoing saves/deletes and zero retained per-record failures. The device had
+643 items and 3,041 activity events after downloading cloud changes. This is
+real owner-device upload/download evidence, not the multi-account sharing matrix.
+
+1,887 older activity-event baseline snapshots remain quarantined for explicit
+Settings → Review recovered changes decisions. No item baseline remains. These
+are preserved local history whose prior server state is ambiguous; successful
+transport does not establish that every history record should be re-uploaded.
+The handoff remains `reconciling`, and the app may show the specific migration
+review warning until those decisions are resolved. Do not treat that warning
+as a network failure or automatically discard/upload the snapshots.

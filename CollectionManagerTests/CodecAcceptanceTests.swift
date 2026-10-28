@@ -205,6 +205,13 @@ import CollaborationCore
         try await actor.acknowledgeSentChanges(savedRecords: [saved], deletedRecordIDs: [], in: .private)
         try await actor.reconcileFailedSave(attemptedRecord: failed, serverRecord: nil, error: CKError(.requestRateLimited), in: .private)
         try await actor.retainFailedDelete(deleted, error: CKError(.networkFailure), in: .private)
+        // Repeated failures retain one local diagnostic per record, without
+        // turning diagnostics into outgoing changes or retiring failed work.
+        try await actor.reconcileFailedSave(attemptedRecord: failed, serverRecord: nil, error: CKError(.requestRateLimited), in: .private)
+        let failures = try ModelContext(container).fetch(FetchDescriptor<CollectionOutgoingSnapshot>()).filter { $0.operation == "syncFailure" }
+        XCTAssertEqual(failures.count, 2)
+        let detail = try XCTUnwrap(failures.first { $0.recordName == failed.recordID.recordName }?.recordArchive)
+        XCTAssertEqual(try JSONDecoder().decode([String: String].self, from: detail)["code"], String(CKError.Code.requestRateLimited.rawValue))
         let restarted = codec(container)
         let pending = try await restarted.pendingLocalChanges(in: .private)
         XCTAssertEqual(Set(pending.map(\.recordID)), [failed.recordID, deleted])
@@ -212,6 +219,7 @@ import CollaborationCore
         try await restarted.acknowledgeSentChanges(savedRecords: [], deletedRecordIDs: [deleted], in: .private)
         let remaining = try await codec(container).pendingLocalChanges(in: .private)
         XCTAssertEqual(remaining.map(\.recordID), [failed.recordID])
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<CollectionOutgoingSnapshot>()).filter { $0.operation == "syncFailure" }.count, 1)
     }
 
     func testMalformedRecordRollsBackWholeFetchedBatch() async throws {
