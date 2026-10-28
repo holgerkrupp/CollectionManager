@@ -49,3 +49,14 @@ No private database, account IDs or collection names are committed to Git.
 The optional real-data test is enabled only by setting
 `TEST_RUNNER_CM_RECOVERY_BACKUP` to a private backup folder before xcodebuild.
 It skips on CI when that input is absent. Synthetic cases always run.
+
+The updated Production app was installed over the existing iPhone app (no
+uninstall), and the explicit recovery launch completed. A fresh device-container
+snapshot passed SQLite integrity checking. Every legacy item/event/queued-change/
+web-source/sync-state field and UUID matched the pre-install copy; current
+collection values, ownership, zones, server record state and opaque engine bytes
+were preserved. The original default.store and its WAL were byte-for-byte
+unchanged. A normal launch without recovery arguments retained all recovered
+rows and exactly one pending-review receipt. Cloud replay remains deliberately
+paused; this verifies local recovery, not the complete #10/#17 real-account matrix.
+External pre-install/post-recovery copies and detailed counts remain private.
