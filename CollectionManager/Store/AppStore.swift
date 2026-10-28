@@ -8,6 +8,9 @@ import SwiftData
     private var backgroundRepository: CollectionBackgroundRepository?
     private var modelContext: ModelContext?
     private var cloudService: CloudKitSharingService?
+    private var recoveryContainer: ModelContainer?
+    var cloudPausedForOneTimeRecovery = false
+    private var recoveryPauseMessage: String { String(localized: "Your older library has been restored locally. iCloud sync is paused until the one-time recovery is reviewed.") }
     private var localChangesObservation: NSObjectProtocol?
     var sharingSession: CollectionSharingSession?
     let editSessions = CollectionEditSessions()
@@ -50,6 +53,9 @@ import SwiftData
     func configure(context: ModelContext, container: ModelContainer, failureInjector: ((RepositoryFailurePoint) throws -> Void)? = nil) {
         guard repository == nil else { return }
         modelContext = context
+        recoveryContainer = container
+        do { cloudPausedForOneTimeRecovery = try LegacyStoreRecovery.cloudIsPaused(in: container) }
+        catch { cloudPausedForOneTimeRecovery = true; persistenceError = error.localizedDescription }
         let repository = CollectionRepository(context: context)
         repository.failureInjector = failureInjector
         self.repository = repository
@@ -62,6 +68,19 @@ import SwiftData
         }
     }
 
+    func restoreOldDefaultStoreOnce() async throws -> LegacyStoreRecoverySummary {
+        guard PersistentStoreBootstrap.libraryEnvironment == .production else { throw RepositoryError.validation(String(localized: "Run the Production scheme to recover this older library.")) }
+        guard let recoveryContainer else { throw RepositoryError.fetchFailed }
+        cloudPausedForOneTimeRecovery = true
+        let result = try await LegacyStoreRecovery(target: recoveryContainer).restore()
+        load()
+        return result
+    }
+    func resumeCloudAfterOneTimeRecovery() async throws {
+        guard let recoveryContainer else { throw RepositoryError.fetchFailed }
+        try await LegacyStoreRecovery(target: recoveryContainer).resumeCloudAfterReview()
+        cloudPausedForOneTimeRecovery = false
+    }
     func beginIntentOperation() throws {
         guard repository != nil else { throw RepositoryError.validation(String(localized: "Your library is unavailable. Open Collection Manager to recover the persistent store.")) }
         persistenceError = nil
@@ -308,13 +327,14 @@ import SwiftData
         do { try repository?.deleteWebSync(sync); if let id = selectedCollection?.id { webSyncs = try repository?.webSyncs(for: id) ?? [] }; scheduleWebSync()
         } catch { persistenceError = error.localizedDescription }
     }
-    func syncWebSource(_ sync: WebSyncRecord) async { guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? String(localized: "Sync complete. Added: \(result.added). Updated: \(result.updated)."); scheduleWebSync(); await loadSelectedCollectionInBackground() }
+    func syncWebSource(_ sync: WebSyncRecord) async { guard !cloudPausedForOneTimeRecovery else { lastWebSyncMessage = recoveryPauseMessage; return }; guard let modelContext else { return }; let result = await HTMLSyncCoordinator(context: modelContext).sync(sync); lastWebSyncMessage = result.error ?? String(localized: "Sync complete. Added: \(result.added). Updated: \(result.updated)."); scheduleWebSync(); await loadSelectedCollectionInBackground() }
 
     private func scheduleWebSync() {
         guard let modelContext else { return }
         WebSyncScheduler.schedule(context: modelContext)
     }
     func syncCollections() async {
+        guard !cloudPausedForOneTimeRecovery else { syncState = .error; syncError = recoveryPauseMessage; return }
         guard let repository, let cloudService else { return }
         guard syncState != .syncing else { syncRequestedWhileSyncing = true; return }
         syncState = .syncing
@@ -348,6 +368,7 @@ import SwiftData
     }
 
     @discardableResult func acceptShare(from url: URL) async -> Bool {
+        guard !cloudPausedForOneTimeRecovery else { syncError = recoveryPauseMessage; return false }
         guard let cloudService else { syncError = SharingError.unavailable.localizedDescription; return false }
         do {
             try await cloudService.accept(url: url)
@@ -358,6 +379,7 @@ import SwiftData
     }
 
     @discardableResult func acceptShare(metadata: CKShare.Metadata) async -> Bool {
+        guard !cloudPausedForOneTimeRecovery else { syncError = recoveryPauseMessage; return false }
         guard let cloudService else { syncError = SharingError.unavailable.localizedDescription; return false }
         do {
             try await cloudService.accept(metadata)

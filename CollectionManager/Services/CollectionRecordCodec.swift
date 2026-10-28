@@ -559,7 +559,9 @@ actor CollectionRecordCodec: ModelActor, DurableSwiftDataRecordCodec {
             guard zone.roleRawValue == "owner" || zone.roleRawValue == "editor" else { continue }
             let scope = CollaborationDatabaseScope(rawValue: zone.scope) ?? .private
             let id = CKRecord.ID(recordName: info.name, zoneID: CKRecordZone.ID(zoneName: zone.zoneName, ownerName: zone.ownerName))
-            try stage(.save(encodeModel(model, id: id, scope: scope)), mutationIDs: [], scope: scope, baseline: true)
+            if try baselineRows(for: id, scope: scope).isEmpty {
+                try stage(.save(encodeModel(model, id: id, scope: scope)), mutationIDs: [], scope: scope, baseline: true)
+            }
         }
         if page.count < limit { progress.bootstrapModelIndex += 1; progress.bootstrapOffset = 0 }
         else { progress.bootstrapOffset += page.count }

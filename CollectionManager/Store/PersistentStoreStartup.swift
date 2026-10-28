@@ -45,7 +45,7 @@ struct StoreStartupFailure: LocalizedError, Sendable {
     }
 }
 
-enum PersistentStoreBootstrap {
+nonisolated enum PersistentStoreBootstrap {
     static let logger = Logger(subsystem: "de.holgerkrupp.CollectionManager", category: "store-startup")
 
     #if DEBUG

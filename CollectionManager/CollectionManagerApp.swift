@@ -134,6 +134,13 @@ private struct IsolatedTestLayout: ViewModifier {
     @NSApplicationDelegateAdaptor(CloudShareAppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
+    @State private var oneTimeRecoveryComplete = false
+    @State private var oneTimeRecoveryError: String?
+    @State private var recoveryAttempt = 0
+    private var recoveryRequested: Bool {
+        ProcessInfo.processInfo.arguments.contains("--recover-legacy-default-store-once") ||
+        ProcessInfo.processInfo.arguments.contains("--resume-after-legacy-recovery-review")
+    }
     @State private var container: ModelContainer?
     @State private var startupFailure: StoreStartupFailure?
     @State private var store: AppStore
@@ -169,6 +176,26 @@ private struct IsolatedTestLayout: ViewModifier {
         WindowGroup {
             Group {
                 if let container {
+                    if recoveryRequested && !oneTimeRecoveryComplete {
+                        VStack(spacing: 16) {
+                            Text("Recovering your older library").font(.title2)
+                            if let oneTimeRecoveryError {
+                                Text(oneTimeRecoveryError)
+                                Button("Retry") { recoveryAttempt += 1 }
+                            } else { ProgressView("Preserving both stores and restoring missing records…") }
+                        }
+                        .padding()
+                        .task(id: recoveryAttempt) {
+                            oneTimeRecoveryError = nil
+                            do {
+                                if ProcessInfo.processInfo.arguments.contains("--recover-legacy-default-store-once") {
+                                    let result = try await store.restoreOldDefaultStoreOnce()
+                                    print("CM_ONE_TIME_RECOVERY imported=\(result.importedItems) source=\(result.items) history=\(result.events) queued=\(result.pendingChanges)")
+                                } else { try await store.resumeCloudAfterOneTimeRecovery() }
+                                oneTimeRecoveryComplete = true
+                            } catch { oneTimeRecoveryError = error.localizedDescription }
+                        }
+                    } else {
                     RootView()
                         .environment(appStore)
                         .modifier(IsolatedTestLayout())
@@ -190,6 +217,7 @@ private struct IsolatedTestLayout: ViewModifier {
                             Task { await store.syncCollections() }
                         }
                         .onOpenURL { [store] url in Task { await store.acceptShare(from: url) } }
+                    }
                 } else if let startupFailure {
                     StoreRecoveryView(failure: startupFailure, retry: retryStore, selectEnvironment: confirmStoreEnvironment)
                 } else {

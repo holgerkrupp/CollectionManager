@@ -12,6 +12,7 @@ enum WebSyncScheduler {
         #if os(iOS)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
             let work = Task { @MainActor in
+                guard let paused = try? LegacyStoreRecovery.cloudIsPaused(in: container), !paused else { task.setTaskCompleted(success: false); return }
                 let context = ModelContext(container)
                 let configs: [WebSyncRecord]
                 do { configs = try enabledSyncs(in: context).filter { isDue($0) } }
@@ -40,6 +41,10 @@ enum WebSyncScheduler {
     /// actual launch time, so `earliestBeginDate` is deliberately a lower bound.
     @MainActor static func schedule(context: ModelContext) {
         #if os(iOS)
+        guard let paused = try? LegacyStoreRecovery.cloudIsPaused(in: context.container), !paused else {
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+            return
+        }
         let syncs: [WebSyncRecord]
         do { syncs = try enabledSyncs(in: context) }
         catch {
